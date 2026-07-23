@@ -52,7 +52,7 @@ def load_and_preprocess_recording(rec_folder, segment_id = 0):
     recording_processed = spre.common_reference(recording_processed)
     return recording_processed
 # %%
-def opto_wf_preprocessing(session, data_type, target, load_sorting_analyzer = True):
+def opto_wf_preprocessing(session, data_type, target, load_sorting_analyzer = True, unit_filter = False):
     max_spikes_per_unit_spontaneous = 250
     # %%
     session_dir = session_dirs(session)
@@ -90,6 +90,14 @@ def opto_wf_preprocessing(session, data_type, target, load_sorting_analyzer = Tr
     if not load_sorting_analyzer:
         # recording info
         sorting = si.load(session_dir[f'curated_dir_{data_type}'])
+        
+        unit_tbl = get_unit_tbl(session, data_type, summary=True)
+        selected_unit_ids = unit_tbl["unit_id"].values
+        if unit_filter:
+            selected_unit_ids = unit_tbl.query("default_qc == True")["unit_id"].values
+            if len(selected_unit_ids)==0:
+                return None
+            sorting = sorting.select_units(selected_unit_ids)
         spike_vector = sorting.to_spike_vector()
         unit_ids = sorting.unit_ids
         num_units = len(sorting.unit_ids)
@@ -204,6 +212,11 @@ def opto_wf_preprocessing(session, data_type, target, load_sorting_analyzer = Tr
         # filter good channels
         recording_processed = load_and_preprocess_recording(session_dir['raw_rec'], segment_id=session_dir['seg_id']-1)
         we = si.load(session_dir[f'postprocessed_dir_{data_type}'], load_extensions=False)
+
+        # IMPORTANT: match the postprocessed analyzer to the filtered sorting units.
+        # Otherwise we.sparsity.mask still has rows for all original units.
+        we = we.select_units(unit_ids)
+
         good_channel_ids = recording_processed.channel_ids[
             np.in1d(recording_processed.channel_ids, we.channel_ids)
         ]
@@ -211,15 +224,16 @@ def opto_wf_preprocessing(session, data_type, target, load_sorting_analyzer = Tr
         recording_processed_good = recording_processed.select_channels(good_channel_ids)
         print(f"Num good channels: {recording_processed_good.get_num_channels()}")
 
-        # %%
         num_cases = len(sorting_all.unit_ids) // num_units - 2
         sparsity_mask_all = np.tile(we.sparsity.mask, (num_cases + 2, 1))
-        del we
+
         sparsity_all = si.ChannelSparsity(
             sparsity_mask_all,
             unit_ids=sorting_all.unit_ids,
             channel_ids=recording_processed_good.channel_ids
         )
+
+        del we
 
         # %%
         # create analyzer
@@ -826,7 +840,7 @@ def re_filter_opto_waveforms(session, data_type, opto_only = True, load_sorting_
         selected_unit_ids = unit_tbl.query('opto_pass == True')['unit_id'].values
     
     # load opto info
-    data_type = 'curated'
+    data_type = data_type
     target  = 'soma'
     opto_df = pd.read_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_session_{target}.csv'), index_col=0)
     laser_onset_samples = opto_df['laser_onset_samples'].values
@@ -1114,7 +1128,7 @@ def go_cue_waveforms(session, data_type, opto_only = True, load_sorting_analyzer
         selected_unit_ids = unit_tbl.query('opto_pass == True')['unit_id'].values
     
     # load opto info
-    data_type = 'curated'
+    #data_type = 'curated'
     target  = 'soma'
     opto_df = pd.read_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_session_{target}.csv'), index_col=0)
     laser_onset_samples = opto_df['laser_onset_samples'].values

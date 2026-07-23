@@ -21,7 +21,7 @@ pip install --no-deps --no-cache-dir git+https://github.com/AllenNeuralDynamics/
 
 # eval "$(conda shell.bash hook)"
 
-# # create a new environment for codeocean
+# #create a new environment for codeocean
 # conda create -n codeocean python=3.11
 # conda activate codeocean
 # conda install ipykernel
@@ -30,7 +30,7 @@ pip install --no-deps --no-cache-dir git+https://github.com/AllenNeuralDynamics/
 # pip install pandas
 # pip install numpy
 
-# install updated version of code-server
+# #install updated version of code-server
 # VERSION=4.103.2
 # mkdir /.code-server
 # cd /.code-server

@@ -974,7 +974,7 @@ def plot_alignments(session, data_type='curated', unit_ids=None, win_len = 0.5):
 
 if __name__ == '__main__': 
 
-    df = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
+    df = pd.read_csv('/root/capsule/code/data_management/session_assets_DRN_260622.csv')
     session_ids = df['session_id'].values
     session_ids = [session_id for session_id in session_ids if isinstance(session_id, str)]  # filter only behavior sessions
     model_name = None

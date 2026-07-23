@@ -18,6 +18,7 @@ import re
 from utils.beh_functions import parseSessionID, session_dirs, get_unit_tbl
 from utils.plot_utils import shiftedColorMap, template_reorder, get_gradient_colors
 from utils.opto_utils import opto_metrics
+from opto_waveforms_preprocessing import re_filter_opto_waveforms
 from open_ephys.analysis import Session
 import spikeinterface as si
 import spikeinterface.extractors as se
@@ -42,11 +43,11 @@ import matplotlib.cm as cm
 from matplotlib.backends.backend_pdf import PdfPages
 
 
-def opto_summary(session, data_type, target, save=True):
+def opto_summary_DRN(session, data_type, target, save=True):
     session_dir = session_dirs(session)
     we = si.load(session_dir[f'postprocessed_dir_{data_type}'], load_extensions=False)
 
-    unit_tbl = get_unit_tbl(session, data_type, summary=False)
+    unit_tbl = get_unit_tbl(session, data_type, summary=True)
     opto_tag = opto_metrics(session, data_type)
     unit_ids = unit_tbl['unit_id'].values.tolist()
     unit_ids = [int(unit_id) for unit_id in unit_ids]
@@ -328,11 +329,11 @@ def opto_summary(session, data_type, target, save=True):
         & (opto_tag_tbl['p_mean'] > 0.1)
         & (opto_tag_tbl['pass_count'] >= 2)
         & (opto_tag_tbl['lat_max_p'] < 0.025)
-        & (opto_tag_tbl['lat_max_p'] > 0.007)
+        & (opto_tag_tbl['lat_max_p'] > 0.005)
         & (opto_tag_tbl['bl_max_p'] > 0.5 * 0.02)
         & (opto_tag_tbl['bl_max_p'] < 20 * 0.02)
         & (opto_tag_tbl['real_unit'])
-        & (opto_tag_tbl['corr_max_p'] >= 0.85)
+        & (opto_tag_tbl['corr_max_p'] >= 0.8)
     )
 
     # No location gating for DRN currently 3/20/26 JL

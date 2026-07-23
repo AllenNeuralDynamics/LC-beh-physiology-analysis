@@ -745,40 +745,40 @@ def plot_ephys_corr_band(session,
 
 # %%
 if __name__ == '__main__':
+    plot_ephys_corr_band('behavior_835444_2026-02-19_13-08-36', 'raw',  '2')
+    # session_assets = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
+    # session_list = session_assets['session_id']
+    # probe_list = session_assets['probe']
+    # probe_list = [probe for probe, session in zip(probe_list, session_list) if isinstance(session, str)]
+    # session_list = [session for session in session_list if isinstance(session, str)]    
+    # from joblib import Parallel, delayed
+    # def process(session, probe): 
+    #     print(f'Checking {session}')
+    #     session_dir = session_dirs(session)
+    #     # if os.path.exists(os.path.join(session_dir['beh_fig_dir'], f'{session}.nwb')):
+    #     if session_dir['curated_dir_curated'] is not None:
+    #         data_type = 'curated'
+    #     elif session_dir['curated_dir_raw'] is not None:
+    #         data_type = 'raw'
+    #     else:
+    #         print(f'Skipping {session} as it does not have curated or raw data')
+    #         return
 
-    session_assets = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
-    session_list = session_assets['session_id']
-    probe_list = session_assets['probe']
-    probe_list = [probe for probe, session in zip(probe_list, session_list) if isinstance(session, str)]
-    session_list = [session for session in session_list if isinstance(session, str)]    
-    from joblib import Parallel, delayed
-    def process(session, probe): 
-        print(f'Checking {session}')
-        session_dir = session_dirs(session)
-        # if os.path.exists(os.path.join(session_dir['beh_fig_dir'], f'{session}.nwb')):
-        if session_dir['curated_dir_curated'] is not None:
-            data_type = 'curated'
-        elif session_dir['curated_dir_raw'] is not None:
-            data_type = 'raw'
-        else:
-            print(f'Skipping {session} as it does not have curated or raw data')
-            return
-
-        if session_dir['raw_rec'] is None:
-            print(f'Skipping {session} as it does not have raw recording data')
-            return
-        if session_dir[f'curated_dir_{data_type}'] is None:
-            print(f'Skipping {session} as it does not have curated {data_type} data')
-            return
-        print(f'Processing {session}...')
-        # try:
-            # plot_ephys_probe(session, data_type=data_type, probe=probe)  
-        plot_ephys_corr_band(session, 
-                data_type=data_type, 
-                probe = probe)
-        plt.close('all')
-        # plot_ephys_probe(session, data_type=data_type, probe=probe)
-        print(f'Finished {session}')
+    #     if session_dir['raw_rec'] is None:
+    #         print(f'Skipping {session} as it does not have raw recording data')
+    #         return
+    #     if session_dir[f'curated_dir_{data_type}'] is None:
+    #         print(f'Skipping {session} as it does not have curated {data_type} data')
+    #         return
+    #     print(f'Processing {session}...')
+    #     # try:
+    #         # plot_ephys_probe(session, data_type=data_type, probe=probe)  
+    #     plot_ephys_corr_band(session, 
+    #             data_type=data_type, 
+    #             probe = probe)
+    #     plt.close('all')
+    #     # plot_ephys_probe(session, data_type=data_type, probe=probe)
+    #     print(f'Finished {session}')
         # except:
         #     print(f'Error processing {session}')
         #     plt.close('all')
@@ -790,7 +790,7 @@ if __name__ == '__main__':
     #     print(f'Checking {session}')
     #     process(session, probe)
     # process('behavior_791691_2025-06-24_13-21-29', '2')
-    plot_ephys_corr_band('behavior_784803_2025-07-03_13-55-13', 'curated',  '2')
+    # plot_ephys_corr_band('behavior_784803_2025-07-03_13-55-13', 'curated',  '2')
     # plot_ephys_probe('ecephys_713854_2024-03-08_14-54-25', data_type,  '2')
   
 

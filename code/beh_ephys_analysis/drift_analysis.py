@@ -952,28 +952,25 @@ def update_unit_tbl_by_drift(session, data_type):
     return unit_tbl
 
 if __name__ == '__main__':
-    # session_assets = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
-    session_assets = pd.read_csv('/root/capsule/code/data_management/hopkins_session_assets.csv')
+    session_assets = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
     session_list = session_assets['session_id'].values
     session_list = [session for session in session_list if isinstance(session, str)]
-    # session = 'behavior_716325_2024-05-31_10-31-14'
-    # plot_session_opto_drift(session, 'curated', update_csv=True, plot=True)
+
     def process(session):
-        session_dir = session_dirs(session)
+        # session_dir = session_dirs(session)
         # if session_dir['curated_dir_curated'] is not None :
-        if get_unit_tbl(session, 'curated') is not None:
-            # try:
-            print(session)
-            # plot_session_opto_drift(session, 'curated', update_csv=True, plot=True, update_cut=True)
-            generate_session_opto_drift_trial_table(session, 'curated', opto_only=False, save=True)
-            print(f'{session} done')
-            # except:
-            #     print(f'{session} error')
+        #if get_unit_tbl(session, 'curated') is not None:
+            try:
+                print(session)
+                plot_session_opto_drift(session, 'raw', update_csv=True, plot=True, update_cut=False)
+                #generate_session_opto_drift_trial_table(session, 'curated', opto_only=False, save=True)
+                print(f'{session} done')
+            except:
+                print(f'{session} error')
  
     # Parallel(n_jobs=5)(delayed(process)(session) for session in session_list)
-    process('behavior_751004_2024-12-21_13-28-28')
+    #process('behavior_838332_2026-03-10_13-23-52')
     # session_ind = session_list.index('behavior_ZS059_2021-04-12_14-57-43')
-    # for session in session_list[session_ind:]:
-    #     process(session)
-    # generate_session_opto_drift_trial_table('behavior_716325_2024-05-31_10-31-14', 'curated', opto_only=True, save=True)
-    # plot_session_opto_drift(session, 'curated', update_csv=False, plot=False)
+    for session in session_list:
+        process(session)
+

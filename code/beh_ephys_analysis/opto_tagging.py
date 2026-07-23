@@ -419,7 +419,7 @@ def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thres
     unit_qc['waveform_mean'] = nwb.units[:]['waveform_mean']
     unit_qc['waveform_sd'] = nwb.units[:]['waveform_sd']
     unit_qc = unit_qc.apply(pd.to_numeric, errors='ignore') 
-    pass_qc = (unit_qc['isi_violations_ratio'] < 0.5) & \
+    pass_qc = (unit_qc['isi_violations_ratio'] < 0.4) & \
             (unit_qc['decoder_label'] != 'noise') & \
             (unit_qc['decoder_label'] != 'artifact')
             #     (unit_qc['firing_rate'] > 0.1) & \
