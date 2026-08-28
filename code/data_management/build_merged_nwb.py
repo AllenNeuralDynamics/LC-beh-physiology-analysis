@@ -47,6 +47,32 @@ AIND_NAMESPACE = 'aind_beh_ephys'
 AIND_NAMESPACE_VERSION = '0.1.0'
 AIND_NEURODATA_TYPE = 'AindMetadata'
 AIND_LAB_META_DATA_KEY = 'aind_metadata'
+# The AIND metadata files to pick up, by filename stem. Anything else sitting in a
+# data asset (parameter dumps, sorting configs, ...) is ignored.
+METADATA_STEMS = frozenset({
+    'data_description',
+    'subject',
+    'procedures',
+    'instrument',
+    'rig',
+    'acquisition',
+    'session',
+    'processing',
+    'quality_control',
+})
+
+# aind-data-schema v2 renames: rig -> instrument, session -> acquisition. When both
+# turn up across a session's assets the new name wins and the old one is dropped, so
+# the NWB never carries two names for the same thing. Maps new stem -> old stem.
+SUPERSEDED_METADATA_STEMS = {
+    'instrument': 'rig',
+    'acquisition': 'session',
+}
+
+# Metadata filename stems that are merged across data assets instead of taking the
+# highest-precedence copy: each asset records the data processes it ran, so the
+# session's processing history is the union of all of them.
+MERGED_METADATA_STEMS = frozenset({'processing'})
 
 # Load column mappings and descriptions
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
@@ -108,13 +134,46 @@ def aind_metadata_type():
     return get_class(AIND_NEURODATA_TYPE, AIND_NAMESPACE)
 
 
-def load_aind_metadata(session_id, dirs=None, return_path=False):
+def _merge_metadata(base, incoming):
+    """
+    Merge two JSON metadata blobs, with `base` taking precedence.
+
+    Dicts are merged key-wise, lists are concatenated (skipping entries already
+    present, so re-reading the same asset is idempotent), and any other conflict
+    keeps the `base` value. Used for processing.json, where each asset records the
+    data processes it ran and the full history is the union of all of them.
+
+    Args:
+        base: The blob already loaded (higher precedence)
+        incoming: The blob to fold in
+
+    Returns:
+        The merged blob.
+    """
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = dict(base)
+        for key, value in incoming.items():
+            merged[key] = _merge_metadata(base[key], value) if key in base else value
+        return merged
+
+    if isinstance(base, list) and isinstance(incoming, list):
+        merged = list(base)
+        for item in incoming:
+            if item not in merged:
+                merged.append(item)
+        return merged
+
+    return base
+
+
+def load_aind_metadata(session_id, dirs=None, return_path=False, merge_keys=None, stems=None):
     """
     Load the AIND metadata JSON files for a session.
 
-    Reads every *.json in each metadata directory into one dict keyed by filename
-    stem (e.g. {'subject': {...}, 'procedures': {...}, 'rig': {...}}). The
-    directories can span raw, sorted and processed data assets.
+    Reads the known AIND metadata files (METADATA_STEMS) from each metadata directory
+    into one dict keyed by filename stem (e.g. {'subject': {...}, 'procedures': {...},
+    'instrument': {...}}). The directories can span raw, sorted and processed data
+    assets; any other *.json in them is ignored.
 
     Directories are deduplicated (by normalised absolute path, order preserved), and
     so are the metadata files themselves: the first directory to supply a given
@@ -125,6 +184,10 @@ def load_aind_metadata(session_id, dirs=None, return_path=False):
     merged into one blob rather than dropped, so a session's processing history is
     the union of what each asset recorded (see _merge_metadata).
 
+    Finally the v1 names superseded by aind-data-schema v2 are dropped when their
+    replacement was found anywhere (SUPERSEDED_METADATA_STEMS): 'acquisition' evicts
+    'session', 'instrument' evicts 'rig'.
+
     Args:
         session_id: Session identifier
         dirs: Directory, or list of directories, to read *.json from, highest
@@ -132,6 +195,7 @@ def load_aind_metadata(session_id, dirs=None, return_path=False):
         return_path: If True, also return the data assets the metadata was read from
         merge_keys: Filename stems to merge across directories instead of taking the
             first copy. Defaults to MERGED_METADATA_STEMS.
+        stems: Filename stems to load. Defaults to METADATA_STEMS.
 
     Returns:
         If return_path=False: dict keyed by filename stem, or None if no metadata
@@ -145,6 +209,9 @@ def load_aind_metadata(session_id, dirs=None, return_path=False):
         dirs = [session_dirs(session_id).get('raw_dir')]
     elif isinstance(dirs, (str, Path)):
         dirs = [dirs]
+
+    merge_keys = MERGED_METADATA_STEMS if merge_keys is None else set(merge_keys)
+    stems = METADATA_STEMS if stems is None else set(stems)
 
     # Deduplicate the directory list, keeping the caller's order
     search_dirs = []
@@ -167,36 +234,47 @@ def load_aind_metadata(session_id, dirs=None, return_path=False):
         return (None, []) if return_path else None
 
     meta_dict = {}
-    used_dirs = []
+    # Which stems each asset contributed, so used_dirs stays accurate after the
+    # superseded stems are evicted below. Insertion-ordered, like search_dirs.
+    asset_keys = {}
     for search_dir in search_dirs:
-        meta_files = sorted(glob.glob(os.path.join(search_dir, '*.json')))
+        meta_files = [path for path in sorted(glob.glob(os.path.join(search_dir, '*.json')))
+                      if os.path.splitext(os.path.basename(path))[0] in stems]
         if not meta_files:
-            logger.info(f"No metadata JSON files found in {search_dir}")
+            logger.info(f"No AIND metadata JSON files found in {search_dir}")
             continue
 
-        loaded_here = 0
         for path in meta_files:
             key = os.path.splitext(os.path.basename(path))[0]
-            if key in meta_dict:
+            if key in meta_dict and key not in merge_keys:
                 logger.info(f"Skipping duplicate metadata file '{key}' from {path}")
                 continue
             try:
                 with open(path, 'r') as f:
-                    meta_dict[key] = json.load(f)
-                loaded_here += 1
+                    blob = json.load(f)
             except (json.JSONDecodeError, OSError) as e:
                 logger.warning(f"Could not read metadata file {path}: {e}")
+                continue
 
-        if loaded_here:
-            asset_dir = data_asset_dir(search_dir)
-            if asset_dir not in used_dirs:
-                used_dirs.append(asset_dir)
+            if key in meta_dict:
+                meta_dict[key] = _merge_metadata(meta_dict[key], blob)
+                logger.info(f"Merged metadata file '{key}' from {path}")
+            else:
+                meta_dict[key] = blob
+            asset_keys.setdefault(data_asset_dir(search_dir), set()).add(key)
+
+    # Drop the v1 names whose v2 replacement was found in any asset
+    for new_stem, old_stem in SUPERSEDED_METADATA_STEMS.items():
+        if new_stem in meta_dict and old_stem in meta_dict:
+            del meta_dict[old_stem]
+            logger.info(f"Dropped '{old_stem}' metadata, superseded by '{new_stem}'")
 
     if not meta_dict:
         return (None, []) if return_path else None
 
+    used_dirs = [asset for asset, keys in asset_keys.items() if keys & meta_dict.keys()]
     logger.info(f"Loaded {len(meta_dict)} metadata files from {len(used_dirs)} "
-                f"directory(ies): {', '.join(meta_dict)}")
+                f"data asset(s): {', '.join(meta_dict)}")
     return (meta_dict, used_dirs) if return_path else meta_dict
 
 
@@ -970,11 +1048,14 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     # just the raw asset — and load_aind_metadata deduplicates both the directories
     # and the files themselves.
     if add_metadata:
-        metadata_dirs = [session_dirs(session_id).get('raw_dir')]
+        # Processed/sorted assets first so their metadata wins over the raw asset's;
+        # processing.json is merged across all of them rather than overridden.
+        metadata_dirs = []
         for value in data_paths.values():
             if value is None:
                 continue
             metadata_dirs.extend([value] if isinstance(value, str) else value)
+        metadata_dirs.append(session_dirs(session_id).get('raw_dir'))
 
         meta_dict, meta_dirs = load_aind_metadata(session_id, dirs=metadata_dirs, return_path=True)
         if meta_dict is not None:
