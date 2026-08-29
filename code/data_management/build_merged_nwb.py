@@ -51,6 +51,11 @@ AIND_LAB_META_DATA_KEY = 'aind_metadata'
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
 COLUMN_DESC_PATH = '/root/capsule/code/data_management/column_names_description.json'
 
+# Fiber photometry: per-subject surgery records (region -> implant hemisphere), used to
+# label photometry acquisitions by brain region instead of channel index.
+FP_METADATA_DIR = '/root/capsule/code/data_management/FP_metadata'
+PHOTOMETRY_SIGNALS = ('G', 'Iso', 'G-Iso')
+
 with open(COLUMN_MAP_PATH, 'r') as f:
     COLUMN_MAP = json.load(f)
 
@@ -155,6 +160,87 @@ def add_aind_metadata(nwb_file, meta_dict):
         )
     )
     return nwb_file
+
+
+def photometry_channel_labels(session_id):
+    """
+    Build the channel index -> region label map for a session's photometry channels.
+
+    Acquisition names in the behavior NWB carry the fiber's channel index
+    ('G_1_tri-exp_mc'), which says nothing about where the fiber sat. Two metadata
+    sources are combined into a 'REGION-HEMISPHERE' label (e.g. 'TH-R'):
+      * index -> region: the per-session <raw_dir>/fib/*.json, same source
+        photometry_utils.get_FP_data uses ('mPFC' is renamed 'PL' as it does).
+        When that file is missing, fall back to the key order of the subject's
+        FP_metadata file, whose keys are listed in channel order.
+      * region -> hemisphere: FP_metadata/<subject>.json, the surgery record.
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        dict of channel index (str) -> label (str). Empty when no mapping is available;
+        the hemisphere is omitted from the label if the surgery record has no entry.
+    """
+    session_dir = session_dirs(session_id)
+
+    hemispheres = {}
+    fp_meta_path = os.path.join(FP_METADATA_DIR, f"{session_dir['aniID']}.json")
+    if os.path.exists(fp_meta_path):
+        with open(fp_meta_path, 'r') as f:
+            hemispheres = json.load(f)
+    else:
+        logger.info(f"No FP surgery metadata at {fp_meta_path}")
+
+    regions = {}
+    fib_dir = os.path.join(session_dir['raw_dir'], 'fib')
+    fib_jsons = sorted(glob.glob(os.path.join(fib_dir, '*.json'))) if os.path.isdir(fib_dir) else []
+    if fib_jsons:
+        if len(fib_jsons) > 1:
+            logger.warning(f"Multiple fib metadata files in {fib_dir}, using {os.path.basename(fib_jsons[0])}")
+        with open(fib_jsons[0], 'r') as f:
+            regions = {str(k): v for k, v in json.load(f).items()}
+        # get_FP_data renames mPFC to PL; keep the same region vocabulary
+        regions = {k: ('PL' if v == 'mPFC' else v) for k, v in regions.items()}
+    elif hemispheres:
+        # No per-session fiber map: the surgery record lists regions in channel order
+        regions = {str(i): region for i, region in enumerate(hemispheres)}
+        logger.info(f"No fib metadata for {session_id}, using FP_metadata key order: {regions}")
+
+    labels = {}
+    for index, region in regions.items():
+        hemisphere = hemispheres.get(region)
+        labels[index] = f'{region}-{hemisphere}' if hemisphere else region
+        if hemisphere is None:
+            logger.warning(f"No hemisphere for region {region} in {fp_meta_path}, labeling channel {index} as {region}")
+    return labels
+
+
+def rename_photometry_acquisition(acq_name, channel_labels):
+    """
+    Replace the channel index in a photometry acquisition name with its region label.
+
+    Photometry names are '<signal>_<channel index>[_<processing method>]', where signal
+    is G, Iso or G-Iso, e.g. 'G_1_tri-exp_mc' -> 'G_TH-R_tri-exp_mc'. Names that are not
+    photometry channels, or whose index has no label, are returned unchanged.
+
+    Args:
+        acq_name: acquisition name from the behavior NWB
+        channel_labels: dict of channel index (str) -> region label, from
+                        photometry_channel_labels()
+
+    Returns:
+        (new_name, region_label). region_label is None when nothing was renamed.
+    """
+    parts = acq_name.split('_')
+    if len(parts) < 2 or parts[0] not in PHOTOMETRY_SIGNALS:
+        return acq_name, None
+
+    label = channel_labels.get(parts[1])
+    if label is None:
+        return acq_name, None
+
+    return '_'.join([parts[0], label] + parts[2:]), label
 
 
 def pupil_data_to_timeseries(pupil_data):
@@ -661,19 +747,28 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
 
     # 5b. Add acquisition TimeSeries from behavior NWB (length > 1)
     if behavior_nwb and behavior_nwb.acquisition:
+        # Photometry channels are renamed from channel index to brain region
+        channel_labels = photometry_channel_labels(session_id)
         for acq_name, acq_data in behavior_nwb.acquisition.items():
             if hasattr(acq_data, 'timestamps') and len(acq_data.timestamps) > 1:
+                new_name, region_label = rename_photometry_acquisition(acq_name, channel_labels)
+                description = acq_data.description if hasattr(acq_data, 'description') else ''
+                if region_label is not None:
+                    # Keep the original channel index, it is the only link back to the raw data
+                    description = f"{description} (fiber in {region_label}, channel {acq_name.split('_')[1]})".strip()
+
                 # Copy TimeSeries to new NWB
                 from pynwb import TimeSeries
                 new_ts = TimeSeries(
-                    name=acq_name,
+                    name=new_name,
                     data=acq_data.data[:].astype(np.float64),
                     timestamps=acq_data.timestamps[:].astype(np.float64),
                     unit=acq_data.unit if hasattr(acq_data, 'unit') else 'N/A',
-                    description=acq_data.description if hasattr(acq_data, 'description') else ''
+                    description=description
                 )
                 new_nwb.add_acquisition(new_ts)
-                logger.info(f"Added acquisition TimeSeries: {acq_name} ({len(acq_data.timestamps)} timestamps)")
+                renamed_from = f" (renamed from {acq_name})" if new_name != acq_name else ''
+                logger.info(f"Added acquisition TimeSeries: {new_name}{renamed_from} ({len(acq_data.timestamps)} timestamps)")
 
                 # Track lick, reward, and fiber photometry modalities
                 if 'lick' in acq_name.lower():
