@@ -1154,10 +1154,6 @@
 			"mount": "behavior_782394_2025-04-24_12-07-34_sorted"
 		},
 		{
-			"id": "7b6e65c2-55f1-473b-95d3-9d84c5d944fb",
-			"mount": "all_tongue_movements"
-		},
-		{
 			"id": "7bf4aa31-226c-4c9c-835b-ae0da5ff1ce0",
 			"mount": "merfish_data"
 		},
@@ -2212,6 +2208,10 @@
 		{
 			"id": "f360b4fd-88d5-4676-9770-5a3e94becc1d",
 			"mount": "behavior_754897_2025-03-11_12-07-41_raw_data"
+		},
+		{
+			"id": "f3845a98-56c6-4fcd-b174-ca4c28a3dd74",
+			"mount": "all_tongue_movements"
 		},
 		{
 			"id": "f3e12a7b-ae78-4fed-8a4a-6bc065016f85",
