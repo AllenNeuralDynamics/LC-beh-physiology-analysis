@@ -81,7 +81,7 @@ Analyzes behavioral and neural factors underlying hit vs. miss responses to the 
 **Notebook:** [`F_behavior_w_FP.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_behavior_w_FP.ipynb)\
 Characterizes choice-history dependent behavior (logistic regression GLM over reward/choice history, up to 15-trial lags) restricted to the subset of sessions with simultaneous fiber-photometry recordings. Applies behavioral quality-control filtering (`beh_only.json`) and visualizes which sessions pass or fail each quality criterion.\
 **Run time:** ~4 min\
-**Manuscript figure panels:** Fig. 4 c; Fig. 5 e; Fig. 6 b(left); Fig. S12 a,l,m\
+**Manuscript figure panels:** Fig. 4 c; Fig. 5 e; Fig. 6 b(left); Fig. E9 a,l,m\
 **Prerequisites:**
 - `combined_beh_sessions.pkl` filtered for photometry sessions (from [`behavior_metrics_generation.py`](code/beh_ephys_analysis/session_combine/figure_preparation/behavior_metrics_generation.py) / [`photometry_generation.py`](code/beh_ephys_analysis/session_combine/figure_preparation/photometry_generation.py))
 
@@ -89,7 +89,7 @@ Characterizes choice-history dependent behavior (logistic regression GLM over re
 **Notebook:** [`F_lick_train_analysis.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_lick_train_analysis.ipynb)\
 Analyzes lick-train statistics across sessions: stay-vs-switch lick-latency distributions, spontaneous lick-side preference versus task reward ratio, and logistic-regression z-statistics relating reward-ratio deviation to spontaneous licking.\
 **Run time:** ~2 min\
-**Manuscript figure panels:** Fig. S12 d,h,i,j\
+**Manuscript figure panels:** Fig. E9 d,h,i,j\
 **Prerequisites:**
 - Session behavioral tables (`session_assets.csv` / Hopkins session assets) and video-based lick detection
 
@@ -97,7 +97,7 @@ Analyzes lick-train statistics across sessions: stay-vs-switch lick-latency dist
 **Notebook:** [`F_example_licks.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_example_licks.ipynb)\
 Generates example lick-raster and lick-rate PSTH figures for representative sessions, combining video-detected and behavior-sensor lick detection, split by in-trial reward outcome.\
 **Run time:** ~1 min\
-**Manuscript figure panels:** Fig. S12 b,c_top,c_bottom,g_bottom\
+**Manuscript figure panels:** Fig. E9 b,c_top,c_bottom,g_bottom\
 **Prerequisites:**
 - Per-session behavioral and video-based lick detection data
 
@@ -108,7 +108,7 @@ Generates example lick-raster and lick-rate PSTH figures for representative sess
 **Notebook:** [`F_ephys_behavior_action&outcome.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_ephys_behavior_action&outcome.ipynb)\
 The primary neural coding notebook. Analyzes how single units encode behavioral variables related to actions and outcomes. Performs GLM-based analysis to identify neurons tuned to task variables including outcome, chosen action (Q-value), and policy updates, maps functionally-defined neurons in CCF space, and compares neural encoding with photometry signals.\
 **Run time:** ~20 min\
-**Manuscript figure panels:** Fig. 4 g; Fig. 5 b,c,f,g,k(left,right); Fig. 6 a,e,f,g,h; Fig. S15 a,b,c,e,f(top,bottom); Fig. S17 i(left,right)\
+**Manuscript figure panels:** Fig. 4 g; Fig. 5 b,c,f,g,k(left,right); Fig. 6 a,e,f,g,h; Fig. E12 a,b,c,e,f(top,bottom); Fig. E14 i(left,right)\
 **Prerequisites:**
 - Combined unit table with quality control applied, waveform features, basic ephys metrics, and GLM model results for behavioral-variable encoding (see [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py), [`outcome_window_generation_parallel.py`](code/beh_ephys_analysis/session_combine/figure_preparation/outcome_window_generation_parallel.py))
 
@@ -116,7 +116,7 @@ The primary neural coding notebook. Analyzes how single units encode behavioral 
 **Notebook:** [`F_ephys_behavior_examples.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_ephys_behavior_examples.ipynb)\
 Generates curated single-unit example raster + PSTH figures (silicon probe and tetrode recordings) for stay-vs-switch, respond-vs-ignore, hit-vs-miss, RPE-scaling, and antidromic-stimulation behavioral splits, plus lick-bout-aligned examples for task and spontaneous licks.\
 **Run time:** ~7 min\
-**Manuscript figure panels:** Fig. 4 b,f; Fig. 5 a; Fig. 6 b(right),d(left,right); Fig. S13 j(top,bottom); Fig. S15 d(left,right),o,p\
+**Manuscript figure panels:** Fig. 4 b,f; Fig. 5 a; Fig. 6 b(right),d(left,right); Fig. E10 j(top,bottom); Fig. E12 d(left,right),o,p\
 **Prerequisites:**
 - `combined_unit_tbl.pkl` (from [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py))
 - Per-session spike data
@@ -125,7 +125,7 @@ Generates curated single-unit example raster + PSTH figures (silicon probe and t
 **Notebook:** [`F_pupil_beh_ephys.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_pupil_beh_ephys.ipynb)\
 Analyzes the relationship between pupil dilation dynamics and neural activity during the task. Computes spike-pupil cross-correlations and pupil auto-correlations, fits exponential decay to characterize coupling and intrinsic timescales, and relates pupil features to behavioral encoding, waveform features, and task response properties.\
 **Run time:** ~3 min\
-**Manuscript figure panels:** Fig. S16 d,f,g(right),h,j,l,n\
+**Manuscript figure panels:** Fig. E13 d,f,g(right),h,j,l,n\
 **Prerequisites:**
 - Preprocessed per-session pupil data, unit quality metrics and behavioral regression results, waveform features and basic ephys characterization, session-level behavioral performance metrics
 
@@ -133,7 +133,7 @@ Analyzes the relationship between pupil dilation dynamics and neural activity du
 **Notebook:** [`F_spont_choice_lick_neuron.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_spont_choice_lick_neuron.ipynb)\
 Compares neural activity during in-trial (task-related) and out-of-trial (spontaneous) licking events, testing whether neurons that respond to licks during task performance show similar responses during spontaneous licking and whether these response properties are spatially organized in the brain.\
 **Run time:** ~9 min\
-**Manuscript figure panels:** Fig. S15 q\
+**Manuscript figure panels:** Fig. E12 q\
 **Prerequisites:**
 - Combined unit table with quality control metrics, behavioral session data, lick detection from video and behavioral data, CCF coordinate registration
 
@@ -141,7 +141,7 @@ Compares neural activity during in-trial (task-related) and out-of-trial (sponta
 **Notebook:** [`F_pupil_examples.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_pupil_examples.ipynb)\
 Shows example-session illustrations of the relationship between pupil dilation dynamics and neural activity, including raw traces, spike-pupil cross-correlations, and trial-aligned spike-rate and pupil-dilation PSTHs split by task variables.\
 **Run time:** ~3 min\
-**Manuscript figure panels:** Fig. S16 b,c,e(top/bottom,left/right),g(left),i,k,m\
+**Manuscript figure panels:** Fig. E13 b,c,e(top/bottom,left/right),g(left),i,k,m\
 **Prerequisites:**
 - Preprocessed per-session pupil data, unit quality metrics and behavioral regression results, waveform features and basic ephys characterization, session-level behavioral performance metrics
 
@@ -152,7 +152,7 @@ Shows example-session illustrations of the relationship between pupil dilation d
 **Notebook:** [`F_antidromic_combined.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_antidromic_combined.ipynb)\
 Identifies and characterizes antidromically-activated projection neurons across sessions. Applies a tiered classification system (tier 1: jitter, collision test, and antidromic response criteria; tier 2: looser thresholds) to classify PrL → subcortical projection neurons.\
 **Run time:** ~1 min\
-**Manuscript figure panels:** Fig. S13 k,l,m\
+**Manuscript figure panels:** Fig. E10 k,l,m\
 **Prerequisites:**
 - `combined_unit_tbl.pkl` (from [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py))
 - `combined_antidromic_tbl.pkl` (from [`antidromic_generation.py`](code/beh_ephys_analysis/session_combine/figure_preparation/antidromic_generation.py))
@@ -161,7 +161,7 @@ Identifies and characterizes antidromically-activated projection neurons across 
 **Notebook:** [`F_basic_ephys.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_basic_ephys.ipynb)\
 Comprehensive characterization of electrophysiological unit properties across all recorded neurons. Analyzes baseline and response firing rates, burst properties (ACG fit parameters), waveform features, and opto-tagging quality. Fits OLS models examining how intrinsic properties predict the degree of outcome vs. action coding.\
 **Run time:** ~1 min\
-**Manuscript figure panels:** Fig. 4 h; Fig. S13 e,f(top/bottom,left/right)\
+**Manuscript figure panels:** Fig. 4 h; Fig. E10 e,f(top/bottom,left/right)\
 **Prerequisites:**
 - `combined_unit_tbl.pkl` (from [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py))
 - `combined_basic_ephys.pkl` (from [`basic_ephys_generation.py`](code/beh_ephys_analysis/session_combine/figure_preparation/basic_ephys_generation.py))
@@ -171,7 +171,7 @@ Comprehensive characterization of electrophysiological unit properties across al
 **Notebook:** [`F_cross_correlation.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_cross_correlation.ipynb)\
 Analyzes spike train temporal structure using auto-correlations and cross-correlations. Computes pairwise cross-correlations between neurons (including across PrL and S1) to assess functional connectivity, and visualizes correlation structure mapped to CCF coordinates.\
 **Run time:** ~7 min\
-**Manuscript figure panels:** Fig. 4 e; Fig. S15 r(left,mid,right),s,t\
+**Manuscript figure panels:** Fig. 4 e; Fig. E12 r(left,mid,right),s,t\
 **Prerequisites:**
 - `combined_unit_tbl.pkl` (from [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py))
 - Per-session spike data
@@ -180,7 +180,7 @@ Analyzes spike train temporal structure using auto-correlations and cross-correl
 **Notebook:** [`F_ephys_opto_examples.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_ephys_opto_examples.ipynb)\
 Generates single-unit example rasters, PSTHs, and raw voltage traces for opto-tagging and antidromic-stimulation experiments, illustrating light-evoked spiking and collision tests for identified LC-NE and projection neurons.\
 **Run time:** ~8 min\
-**Manuscript figure panels:** Fig. S13 c,d(left,right),i\
+**Manuscript figure panels:** Fig. E10 c,d(left,right),i\
 **Prerequisites:**
 - Per-session spike and raw opto-stimulation trace data
 
@@ -191,7 +191,7 @@ Generates single-unit example rasters, PSTHs, and raw voltage traces for opto-ta
 **Notebook:** [`F_waveform_space.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_waveform_space.ipynb)\
 Characterizes action potential waveform morphology across the unit population (silicon probe recordings). Extracts waveform shape features, reduces via PCA, maps onto CCF coordinates with brain mesh overlays, and tests spatial dependence statistics. Opto-tagged units are overlaid to reveal waveform-type identity.\
 **Run time:** ~8 min\
-**Manuscript figure panels:** Fig. S14 b,c,d,e,f\
+**Manuscript figure panels:** Fig. E11 b,c,d,e,f\
 **Prerequisites:**
 - `combined_unit_tbl.pkl` (from [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py))
 - `combined_waveform_NP.pkl` (from [`waveform_generation_np.py`](code/beh_ephys_analysis/session_combine/figure_preparation/waveform_generation_np.py))
@@ -200,7 +200,7 @@ Characterizes action potential waveform morphology across the unit population (s
 **Notebook:** [`F_waveform_space_tetrode.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_waveform_space_tetrode.ipynb)\
 Identical waveform analysis applied exclusively to tetrode-recorded units, producing the same spatial feature maps for the tetrode recording subset.\
 **Run time:** ~1 min\
-**Manuscript figure panels:** Fig. S14 g,h,i\
+**Manuscript figure panels:** Fig. E11 g,h,i\
 **Prerequisites:**
 - `combined_unit_tbl.pkl` (from [`make_combined_unit_tbl.py`](code/beh_ephys_analysis/session_combine/figure_preparation/make_combined_unit_tbl.py))
 - `combined_waveform_TT.pkl` (from [`waveform_generation_tt.py`](code/beh_ephys_analysis/session_combine/figure_preparation/waveform_generation_tt.py))
@@ -209,7 +209,7 @@ Identical waveform analysis applied exclusively to tetrode-recorded units, produ
 **Notebook:** [`F_spatial-axis-comparison.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_spatial-axis-comparison.ipynb)\
 Integrates three datasets to compare cellular organization axes: electrophysiology waveform features, MERFISH spatial transcriptomics (~2,200 cells), and retrograde tracing from 18 brains. Fits a linear spatial axis to each dataset and compares principal spatial gradients across data modalities.\
 **Run time:** ~13 min\
-**Manuscript figure panels:** Fig. 5 d,h; Fig. S18 a,b,c,d\
+**Manuscript figure panels:** Fig. 5 d,h; Fig. E15 a,b,c,d\
 **Prerequisites:**
 - `combined_waveform_NP.pkl` (from [`waveform_generation_np.py`](code/beh_ephys_analysis/session_combine/figure_preparation/waveform_generation_np.py))
 - MERFISH data, retrograde tracing data
@@ -220,7 +220,7 @@ Integrates three datasets to compare cellular organization axes: electrophysiolo
 **Notebook:** [`F_photometry_tuning_psth.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_photometry_tuning_psth.ipynb)\
 Computes tuning curves and PSTHs for fiber photometry signals by binning the signal into 6 prediction error (PE) levels aligned to choice time. Reveals how the PrL photometry signal scales as a function of reward prediction error.\
 **Run time:** ~4 min\
-**Manuscript figure panels:** Fig. 5 j; Fig. 6 i,j,k,l; Fig. S17 g,h(right)\
+**Manuscript figure panels:** Fig. 5 j; Fig. 6 i,j,k,l; Fig. E14 g,h(right)\
 **Prerequisites:**
 - Photometry GLM results (from [`photometry_generation.py`](code/beh_ephys_analysis/session_combine/figure_preparation/photometry_generation.py))
 - Per-session photometry data
@@ -229,7 +229,7 @@ Computes tuning curves and PSTHs for fiber photometry signals by binning the sig
 **Notebook:** [`F_fiber_location.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_fiber_location.ipynb)\
 Reconstructs and visualizes fiber-photometry optic-fiber placement locations in prelimbic cortex (PL) across mice, registering fiber-tip coordinates to the Allen CCF and rendering them with brain-region meshes via brainrender/BrainGlobe.\
 **Run time:** <1 min\
-**Manuscript figure panels:** Fig. S17 b\
+**Manuscript figure panels:** Fig. E14 b\
 **Prerequisites:**
 - Fiber CCF coordinates (`/data/fiber_ccf/PL_ccf_coordinates_pir.csv`), BrainGlobe atlas
 
@@ -237,7 +237,7 @@ Reconstructs and visualizes fiber-photometry optic-fiber placement locations in 
 **Notebook:** [`F_photometry_examples.ipynb`](code/beh_ephys_analysis/session_combine/manuscript_figures/F_photometry_examples.ipynb)\
 Plots example single-session fiber photometry traces, including raw signal processing steps, motion-corrected ΔF/F, GCaMP/isosbestic power spectra, and go-cue/lick-aligned PSTHs.\
 **Run time:** ~2 min\
-**Manuscript figure panels:** Fig. 5 i(right); Fig. S12 e; Fig. S17 c,d,e,f,h(left),j\
+**Manuscript figure panels:** Fig. 5 i(right); Fig. E9 e; Fig. E14 c,d,e,f,h(left),j\
 **Prerequisites:**
 - Per-session photometry data
 
