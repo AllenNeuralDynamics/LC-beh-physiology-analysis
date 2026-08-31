@@ -1,7 +1,7 @@
 """
 Organize manuscript figures and CSVs into per-figure subfolders.
 
-Creates subfolders named Figure4, Figure5, ..., FigureS18 under
+Creates subfolders named Figure4, Figure5, ..., FigureE15 under
 capsule_dirs["manuscript_fig_dir"], then copies all files whose names start
 with the corresponding figure prefix from every existing subfolder into the
 appropriate destination folder.
@@ -34,7 +34,7 @@ def main():
     with open(PANEL_MAP_PATH) as f:
         panel_map = json.load(f)
 
-    figure_names = list(panel_map.keys())  # e.g. ['Figure4', 'Figure5', ..., 'FigureS18']
+    figure_names = list(panel_map.keys())  # e.g. ['Figure4', 'Figure5', ..., 'FigureE15']
 
     # Create destination subfolders
     dest_dirs = {}
@@ -51,8 +51,8 @@ def main():
         if os.path.isdir(os.path.join(fig_dir, d)) and d not in dest_dirs
     ]
 
-    # Match any FigureN or FigureSN prefix in a filename
-    fig_prefix_re = re.compile(r'^(Figure(?:S)?\d+)')
+    # Match any FigureN or FigureEN prefix in a filename
+    fig_prefix_re = re.compile(r'^(Figure(?:E)?\d+)')
 
     unlisted_figures = set()
     for subdir_name in sorted(source_subdirs):

@@ -145,7 +145,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS12": {
+  "FigureE9": {
     "a": {
       "title": "Behavioral performance statistics (distribution)",
       "sample_numbers": {"session_number": null, "animals_number": null}
@@ -203,7 +203,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS13": {
+  "FigureE10": {
     "a": {
       "title": "Optogenetic LC-NE identification strategy with probes/tetrodes",
       "sample_numbers": {"session_number": null, "animals_number": null}
@@ -277,7 +277,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS14": {
+  "FigureE11": {
     "a": {
       "title": "Extracellular waveform feature definitions",
       "sample_numbers": {"session_number": null, "animals_number": null}
@@ -315,7 +315,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS15": {
+  "FigureE12": {
     "a": {
       "title": "Respond-vs-ignore decoding by auROC (heatmap)",
       "sample_numbers": {"session_number": null, "animals_number": null}
@@ -381,7 +381,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS16": {
+  "FigureE13": {
     "a": {
       "title": "Example pupil video frame",
       "sample_numbers": {"session_number": null, "animals_number": null}
@@ -455,7 +455,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS17": {
+  "FigureE14": {
     "a": {
       "title": "Example optic-fiber reconstruction in PL",
       "sample_numbers": {"session_number": null, "animals_number": null}
@@ -505,7 +505,7 @@
       "sample_numbers": {"session_number": null, "animals_number": null}
     }
   },
-  "FigureS18": {
+  "FigureE15": {
     "a": {
       "title": "Primary axes of gene expression, projection target, and spike waveform features (vectors)",
       "sample_numbers": {"session_number": null, "animals_number": null}
