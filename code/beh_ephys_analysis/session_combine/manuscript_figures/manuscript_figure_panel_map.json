@@ -1,0 +1,526 @@
+{
+  "Figure4": {
+    "a": {
+      "title": "Dynamic foraging task structure",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Example session: mouse choices, rewards, and changing reward probabilities over trials (mZS061d20210408)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Choice-history logistic regression coefficients (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "LC-NE optotagging recording strategy",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "Example extracellular spiking around two trials (time series, raster)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "Example go-cue-aligned spike raster sorted by first spike after go cue (raster)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g": {
+      "title": "Go-cue spike rate versus baseline spike rate (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "Go-cue excitation versus go-baseline correlation (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "Figure5": {
+    "a": {
+      "title": "Respond-vs-ignore dependence on reward history (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Pre-respond versus pre-ignore spike rates (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Respond-vs-ignore encoding mapped in LC (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "Respond-vs-ignore encoding along axonal-projection and gene-expression axes (scatter, regression)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "Switch-vs-stay dependence on reward and choice history (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "Switch versus stay spike rates after go cue (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g": {
+      "title": "Switch-vs-stay encoding mapped in LC (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "Switch-vs-stay encoding along axonal-projection and gene-expression axes (scatter, regression)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i_left": {
+      "title": "Frontal-cortex LC-NE axon photometry strategy",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i_right": {
+      "title": "Example LC-NE axonal GCaMP signal in frontal cortex during behavior (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j": {
+      "title": "Mean frontal-cortex axon encoding during switch versus stay trials (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "k_left": {
+      "title": "Switch-vs-stay statistics for frontal-cortex LC-NE axonal activity (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "k_right": {
+      "title": "Switch-vs-stay statistics for isocortex-projecting LC-NE neurons and LC-NE population (histogram, scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "Figure6": {
+    "a": {
+      "title": "Reward-vs-no-reward encoding t-statistics distribution and distribution in space (histogram, scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b_left": {
+      "title": "Reinforcement-learning model schema for RPE",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b_right": {
+      "title": "Model fit to example behavior over trials (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Choice-change relationship to RPE (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d_left": {
+      "title": "Example RPE-scaling neuron (raster, filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d_right": {
+      "title": "Example no-reward-excited neuron (raster, filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "Chosen-value versus outcome effects on spike rates (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "Regression coefficient angle distribution for LC-NE neurons (polar histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g": {
+      "title": "Average activity of reward- and no-reward-excited neurons versus RPE (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "Behavioral choice-change versus neuron activity (errorbar plots)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i": {
+      "title": "Frontal-cortex LC-NE axonal fluorescence by RPE (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j": {
+      "title": "Chosen-value versus outcome effects on NE axonal activity (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "k": {
+      "title": "Regression coefficient angle distribution for cortical axonal activity (polar histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "l": {
+      "title": "Frontal-cortex LC-NE axonal activity versus RPE (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS12": {
+    "a": {
+      "title": "Behavioral performance statistics (distribution)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Example lick raster aligned to choice start (raster)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c_top": {
+      "title": "Mean licking rate for reward-latency sessions (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c_bottom": {
+      "title": "Mean licking rate for reward-latency sessions (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "Stay/switch lick-latency distributions and switch-vs-stay lick latency by session (histogram, scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "In-trial and spontaneous licks example (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "Example video frame for lick detection",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g_bottom": {
+      "title": "Video-detected licks aligned to go cue (raster, histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "Spontaneous lick preference versus task reward ratio (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i": {
+      "title": "Task lick percentage versus reward-ratio deviation (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j": {
+      "title": "Logistic-regression z-statistics predicting spontaneous licks (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "k": {
+      "title": "Reinforcement model schema",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "l": {
+      "title": "Fitted reinforcement-model parameters (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "m": {
+      "title": "Lick-rate changes with negative RPE (errorbar plot)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS13": {
+    "a": {
+      "title": "Optogenetic LC-NE identification strategy with probes/tetrodes",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "ChR2 expression in LC-NE neurons",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Raw tetrode trace with laser-evoked spikes (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d_left": {
+      "title": "Example identified LC-NE neurons responding to light trains (raster, time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d_right": {
+      "title": "Example identified LC-NE neurons responding to light trains (raster, time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "Single-unit quality metrics for identified and unidentified neurons (scatter, distribution)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f_topleft": {
+      "title": "ISI violation ratio for identified and unidentified neurons (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f_topright": {
+      "title": "Waveform peak for identified and unidentified neurons (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f_bottomleft": {
+      "title": "Euclidean distance between waveforms of spontaneous and evoked spikes for identified and unidentified neurons (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f_bottomright": {
+      "title": "Correlation between waveform of spontaneous and evoked spikes for identified and unidentified neurons (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g": {
+      "title": "Antidromic stimulation strategy for cortex-projecting neurons",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "ChRmine expression in LC-NE neurons",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i": {
+      "title": "Example antidromic spikes and collision test (raster, time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j_top": {
+      "title": "Antidromic stimulation trials sorted by first spike (raster)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j_bottom": {
+      "title": "Mean spike rate aligned to antidromic stimulation with latency/jitter/window definitions (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "k": {
+      "title": "Antidromic response-property distributions for cortex-projecting versus other neurons (histograms, distributions)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "l": {
+      "title": "Light-evoked response jitter for cortex-projecting versus other LC-NE cells (distribution)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "m": {
+      "title": "Identified NE neurons in LC space highlighting cortex-projecting cells (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS14": {
+    "a": {
+      "title": "Extracellular waveform feature definitions",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Post-trough slope distribution in LC space (scatter, filled psth, histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Slope symmetry distribution in LC space (scatter, filled psth, histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "Waveform-feature PC1 distribution in LC space (scatter, filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "Mean normalized waveforms by PC1 quintile (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "Slope symmetry versus peak-to-trough time (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g": {
+      "title": "Tetrode waveform depth rank versus PC1 (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "Mean tetrode spike waveform quantiles (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i": {
+      "title": "Ranked depth versus spike-waveform features (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS15": {
+    "a": {
+      "title": "Respond-vs-ignore decoding by auROC (heatmap)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Switch-vs-stay decoding by auROC (heatmap)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Reward-vs-no-reward decoding by auROC (heatmap)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d_left": {
+      "title": "Example go-cue-aligned neurons sorted by first spike (rasters)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d_right": {
+      "title": "Example go-cue-aligned neurons sorted by first spike (rasters)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "Baseline-response activity correlation distribution (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f_top": {
+      "title": "Lick-response spike increase versus tonic modulation strength (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f_bottom": {
+      "title": "Respond-vs-ignore baseline regression versus tonic modulation strength (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "o": {
+      "title": "Example neuron activity aligned to lick-bout starts, task licks (raster, filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "p": {
+      "title": "Example neuron activity aligned to lick-bout starts, spontaneous licks (raster, filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "q": {
+      "title": "Peak spike rate around spontaneous versus in-trial licks (scatter, histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "r_left": {
+      "title": "Three simultaneously recorded neurons with correlated spike rates (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "r_mid": {
+      "title": "Three simultaneously recorded neurons with correlated spike rates (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "r_right": {
+      "title": "Cross-correlations for simultaneous neurons during whole experiment and spontaneous spiking (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "s": {
+      "title": "Example cross-correlograms across neuron pairs (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "t": {
+      "title": "Spatial analysis of cross-correlogram PC1 versus task-response axes (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS16": {
+    "a": {
+      "title": "Example pupil video frame",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Simultaneous LC-NE activity and pupil diameter with go cues (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Example pupil-diameter autocorrelation with exponential fit (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "Distribution of pupil autocorrelation time constants (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e_top_left": {
+      "title": "Trial-aligned spike rates split by switch status (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e_top_right": {
+      "title": "Trial-aligned spike rates split by reward  status (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e_bottom_left": {
+      "title": "Trial-aligned spike rates split by switch status (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e_bottom_right": {
+      "title": "Trial-aligned spike rates split by reward status (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "Pupil regression t-statistics for response, outcome, switch and choice side (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g_left": {
+      "title": "Example spike-pupil cross-correlations (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g_right": {
+      "title": "Population spike-pupil cross-correlations (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h": {
+      "title": "Peak cross-correlation values and lags (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i": {
+      "title": "Example baseline pupil diameter versus baseline spike rate (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j": {
+      "title": "Baseline pupil-spike correlation coefficients (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "k": {
+      "title": "Pupil dilation aligned to trial start by baseline spike rate (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "l": {
+      "title": "Peak pupil dilation correlation with baseline spike rate (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "m": {
+      "title": "Example pupil dilation aligned to trial start by go-cue response of an NE neuron (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "n": {
+      "title": "Peak pupil dilation correlation with go-cue response (histogram) ",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS17": {
+    "a": {
+      "title": "Example optic-fiber reconstruction in PL",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Optic-fiber termini across mice (anatomical map, scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Raw photometry data processing steps (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "Motion-corrected ΔF/F traces (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "e": {
+      "title": "GCaMP and isosbestic power spectra (time series)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "f": {
+      "title": "GCaMP and isosbestic signals around go cues for respond/ignore trials (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "g": {
+      "title": "Post-go-cue isosbestic versus GCaMP change across experiments (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h_left": {
+      "title": "Example trial activity for lick-response effects (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "h_right": {
+      "title": "Population trial activity for lick-response effects (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i_left": {
+      "title": "Baseline axonal activity in PL for lick-response (histogram)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "i_right": {
+      "title": "Baseline single neuron activity for lick-response (histogram, scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "j": {
+      "title": "Example axonal activity during switch versus stay trials (filled psth)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  },
+  "FigureS18": {
+    "a": {
+      "title": "Primary axes of gene expression, projection target, and spike waveform features (vectors)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "b": {
+      "title": "Bootstrapped primary-axis azimuth and elevation distributions (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "c": {
+      "title": "Pairwise comparisons between primary axes across cellular properties (scatter)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    },
+    "d": {
+      "title": "Reward-vs-no-reward t-statistics along first primary axis (scatter/regression)",
+      "sample_numbers": {"session_number": null, "animals_number": null}
+    }
+  }
+}
