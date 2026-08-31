@@ -27,6 +27,7 @@ import sys
 sys.path.insert(0, '/root/capsule/code/beh_ephys_analysis')
 from aind_dynamic_foraging_data_utils.nwb_utils import load_nwb_from_filename
 from utils.beh_functions import get_session_tbl, get_unit_tbl, session_dirs, parseSessionID
+from utils.capsule_migration import capsule_directories
 from utils.pupil_utils import load_pupil
 from pathlib import Path
 from hdmf.common import DynamicTable, VectorData
@@ -46,6 +47,32 @@ AIND_NAMESPACE = 'aind_beh_ephys'
 AIND_NAMESPACE_VERSION = '0.1.0'
 AIND_NEURODATA_TYPE = 'AindMetadata'
 AIND_LAB_META_DATA_KEY = 'aind_metadata'
+# The AIND metadata files to pick up, by filename stem. Anything else sitting in a
+# data asset (parameter dumps, sorting configs, ...) is ignored.
+METADATA_STEMS = frozenset({
+    'data_description',
+    'subject',
+    'procedures',
+    'instrument',
+    'rig',
+    'acquisition',
+    'session',
+    'processing',
+    'quality_control',
+})
+
+# aind-data-schema v2 renames: rig -> instrument, session -> acquisition. When both
+# turn up across a session's assets the new name wins and the old one is dropped, so
+# the NWB never carries two names for the same thing. Maps new stem -> old stem.
+SUPERSEDED_METADATA_STEMS = {
+    'instrument': 'rig',
+    'acquisition': 'session',
+}
+
+# Metadata filename stems that are merged across data assets instead of taking the
+# highest-precedence copy: each asset records the data processes it ran, so the
+# session's processing history is the union of all of them.
+MERGED_METADATA_STEMS = frozenset({'processing'})
 
 # Load column mappings and descriptions
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
@@ -112,43 +139,148 @@ def aind_metadata_type():
     return get_class(AIND_NEURODATA_TYPE, AIND_NAMESPACE)
 
 
-def load_aind_metadata(session_id):
+def _merge_metadata(base, incoming):
     """
-    Load the raw AIND metadata JSON files for a session.
+    Merge two JSON metadata blobs, with `base` taking precedence.
 
-    Reads every *.json in the session's raw data directory into one dict keyed by
-    filename stem (e.g. {'subject': {...}, 'procedures': {...}, 'rig': {...}}).
+    Dicts are merged key-wise, lists are concatenated (skipping entries already
+    present, so re-reading the same asset is idempotent), and any other conflict
+    keeps the `base` value. Used for processing.json, where each asset records the
+    data processes it ran and the full history is the union of all of them.
+
+    Args:
+        base: The blob already loaded (higher precedence)
+        incoming: The blob to fold in
+
+    Returns:
+        The merged blob.
+    """
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = dict(base)
+        for key, value in incoming.items():
+            merged[key] = _merge_metadata(base[key], value) if key in base else value
+        return merged
+
+    if isinstance(base, list) and isinstance(incoming, list):
+        merged = list(base)
+        for item in incoming:
+            if item not in merged:
+                merged.append(item)
+        return merged
+
+    return base
+
+
+def load_aind_metadata(session_id, dirs=None, return_path=False, merge_keys=None, stems=None):
+    """
+    Load the AIND metadata JSON files for a session.
+
+    Reads the known AIND metadata files (METADATA_STEMS) from each metadata directory
+    into one dict keyed by filename stem (e.g. {'subject': {...}, 'procedures': {...},
+    'instrument': {...}}). The directories can span raw, sorted and processed data
+    assets; any other *.json in them is ignored.
+
+    Directories are deduplicated (by normalised absolute path, order preserved), and
+    so are the metadata files themselves: the first directory to supply a given
+    filename stem wins, later copies of that stem are skipped. Pass the processed
+    directories ahead of the raw one so processed metadata takes precedence.
+
+    Stems in merge_keys ('processing' by default) are the exception: every copy is
+    merged into one blob rather than dropped, so a session's processing history is
+    the union of what each asset recorded (see _merge_metadata).
+
+    Finally the v1 names superseded by aind-data-schema v2 are dropped when their
+    replacement was found anywhere (SUPERSEDED_METADATA_STEMS): 'acquisition' evicts
+    'session', 'instrument' evicts 'rig'.
 
     Args:
         session_id: Session identifier
+        dirs: Directory, or list of directories, to read *.json from, highest
+            precedence first. Defaults to the session's raw data directory.
+        return_path: If True, also return the data assets the metadata was read from
+        merge_keys: Filename stems to merge across directories instead of taking the
+            first copy. Defaults to MERGED_METADATA_STEMS.
+        stems: Filename stems to load. Defaults to METADATA_STEMS.
 
     Returns:
-        dict keyed by filename stem, or None if no metadata files were found.
+        If return_path=False: dict keyed by filename stem, or None if no metadata
+            files were found.
+        If return_path=True: Tuple (meta_dict, used_dirs), where used_dirs is the
+            deduplicated list of top-level data asset directories (see
+            data_asset_dir) at least one file was loaded from (empty list if
+            nothing was loaded).
     """
-    raw_dir = session_dirs(session_id).get('raw_dir')
-    if raw_dir is None or not os.path.exists(raw_dir):
-        logger.warning(f"Raw data directory not found for {session_id}")
-        return None
+    if dirs is None:
+        dirs = [session_dirs(session_id).get('raw_dir')]
+    elif isinstance(dirs, (str, Path)):
+        dirs = [dirs]
 
-    meta_files = sorted(glob.glob(os.path.join(raw_dir, '*.json')))
-    if not meta_files:
-        logger.info(f"No metadata JSON files found in {raw_dir}")
-        return None
+    merge_keys = MERGED_METADATA_STEMS if merge_keys is None else set(merge_keys)
+    stems = METADATA_STEMS if stems is None else set(stems)
+
+    # Deduplicate the directory list, keeping the caller's order
+    search_dirs = []
+    seen_dirs = set()
+    for d in dirs:
+        if d is None:
+            continue
+        key = os.path.normcase(os.path.abspath(str(d)))
+        if key in seen_dirs:
+            logger.info(f"Skipping duplicate metadata directory: {d}")
+            continue
+        seen_dirs.add(key)
+        if not os.path.exists(str(d)):
+            logger.warning(f"Metadata directory not found for {session_id}: {d}")
+            continue
+        search_dirs.append(str(d))
+
+    if not search_dirs:
+        logger.warning(f"No existing metadata directories for {session_id}")
+        return (None, []) if return_path else None
 
     meta_dict = {}
-    for path in meta_files:
-        key = os.path.splitext(os.path.basename(path))[0]
-        try:
-            with open(path, 'r') as f:
-                meta_dict[key] = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Could not read metadata file {path}: {e}")
+    # Which stems each asset contributed, so used_dirs stays accurate after the
+    # superseded stems are evicted below. Insertion-ordered, like search_dirs.
+    asset_keys = {}
+    for search_dir in search_dirs:
+        meta_files = [path for path in sorted(glob.glob(os.path.join(search_dir, '*.json')))
+                      if os.path.splitext(os.path.basename(path))[0] in stems]
+        if not meta_files:
+            logger.info(f"No AIND metadata JSON files found in {search_dir}")
+            continue
+
+        for path in meta_files:
+            key = os.path.splitext(os.path.basename(path))[0]
+            if key in meta_dict and key not in merge_keys:
+                logger.info(f"Skipping duplicate metadata file '{key}' from {path}")
+                continue
+            try:
+                with open(path, 'r') as f:
+                    blob = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(f"Could not read metadata file {path}: {e}")
+                continue
+
+            if key in meta_dict:
+                meta_dict[key] = _merge_metadata(meta_dict[key], blob)
+                logger.info(f"Merged metadata file '{key}' from {path}")
+            else:
+                meta_dict[key] = blob
+            asset_keys.setdefault(data_asset_dir(search_dir), set()).add(key)
+
+    # Drop the v1 names whose v2 replacement was found in any asset
+    for new_stem, old_stem in SUPERSEDED_METADATA_STEMS.items():
+        if new_stem in meta_dict and old_stem in meta_dict:
+            del meta_dict[old_stem]
+            logger.info(f"Dropped '{old_stem}' metadata, superseded by '{new_stem}'")
 
     if not meta_dict:
-        return None
+        return (None, []) if return_path else None
 
-    logger.info(f"Loaded {len(meta_dict)} metadata files: {', '.join(meta_dict)}")
-    return meta_dict
+    used_dirs = [asset for asset, keys in asset_keys.items() if keys & meta_dict.keys()]
+    logger.info(f"Loaded {len(meta_dict)} metadata files from {len(used_dirs)} "
+                f"data asset(s): {', '.join(meta_dict)}")
+    return (meta_dict, used_dirs) if return_path else meta_dict
 
 
 def add_aind_metadata(nwb_file, meta_dict):
@@ -263,7 +395,7 @@ def pupil_data_to_timeseries(pupil_data):
     )
 
 
-def load_tongue_movements(session_id):
+def load_tongue_movements(session_id, return_path=False):
     """
     Load tongue movements for a session from the pooled parquet data asset.
 
@@ -273,15 +405,19 @@ def load_tongue_movements(session_id):
 
     Args:
         session_id: session identifier string, e.g. 'behavior_791691_2025-06-27_13-54-30'
+        return_path: If True, also return the data asset the movements came from
 
     Returns:
-        hdmf DynamicTable named 'tongue_movements' with one row per tongue movement,
-        or None if no match found. Same table name as the movs table built by
-        load_keypoint_tracking, since the two are interchangeable sources.
+        If return_path=False: hdmf DynamicTable named 'tongue_movements' with one row
+            per tongue movement, or None if no match found. Same table name as the movs
+            table built by load_keypoint_tracking, since the two are interchangeable
+            sources.
+        If return_path=True: Tuple (table, asset_dir), where asset_dir is the
+            top-level data asset (see data_asset_dir), None when no table was built.
     """
     if not TONGUE_MOVEMENT_PARQUET.exists():
         logger.warning(f"Tongue movement parquet not found at {TONGUE_MOVEMENT_PARQUET}")
-        return None
+        return (None, None) if return_path else None
 
     all_movements_df = pd.read_parquet(TONGUE_MOVEMENT_PARQUET)
     session_video_list = all_movements_df['session'].unique().tolist()
@@ -289,18 +425,18 @@ def load_tongue_movements(session_id):
     animal_id, session_time, _ = parseSessionID(session_id)
     if animal_id is None:
         logger.warning(f"Could not parse session_id: {session_id}")
-        return None
+        return (None, None) if return_path else None
 
     candidate_sessions = [s for s in session_video_list if str(s).startswith(f'behavior_{animal_id}')]
     if not candidate_sessions:
         logger.info(f"No tongue movement data found for animal {animal_id}")
-        return None
+        return (None, None) if return_path else None
 
     time_diffs = [abs((parseSessionID(s)[1] - session_time).total_seconds()) for s in candidate_sessions]
     best_idx = int(np.argmin(time_diffs))
     if time_diffs[best_idx] > 60:
         logger.info(f"Closest tongue movement session is {time_diffs[best_idx]:.0f}s away — skipping")
-        return None
+        return (None, None) if return_path else None
 
     matched_session = candidate_sessions[best_idx]
     logger.info(f"Matched tongue movement session: {matched_session}")
@@ -308,7 +444,7 @@ def load_tongue_movements(session_id):
     movements = all_movements_df[all_movements_df['session'] == matched_session].copy().reset_index(drop=True)
     if len(movements) == 0:
         logger.info("No tongue movement rows found for matched session")
-        return None
+        return (None, None) if return_path else None
 
     # Columns to include in the DynamicTable (drop session identifier)
     exclude_cols = {'session'}
@@ -336,7 +472,7 @@ def load_tongue_movements(session_id):
 
     logger.info(f"Built tongue_movements DynamicTable with {len(movements)} rows "
                 f"and {len(keep_cols)} columns")
-    return table
+    return (table, data_asset_dir(TONGUE_MOVEMENT_PARQUET)) if return_path else table
 
 
 def _prepare_column_data(series):
@@ -404,7 +540,7 @@ def _df_to_dynamic_table(df, name, description, col_descriptions=None):
     return table
 
 
-def load_keypoint_tracking(session_id):
+def load_keypoint_tracking(session_id, return_path=False):
     """
     Load tongue keypoint tracking data for a session from the bottomview DLC asset.
 
@@ -414,30 +550,38 @@ def load_keypoint_tracking(session_id):
 
     Args:
         session_id: session identifier string
+        return_path: If True, also return the data asset the tracking came from
 
     Returns:
-        Tuple (movs_table, kins_table), or (None, None) if no match found.
+        If return_path=False: Tuple (movs_table, kins_table), or (None, None) if no
+            match found.
+        If return_path=True: Tuple (movs_table, kins_table, asset_dir), where
+            asset_dir is the top-level data asset (see data_asset_dir), None when
+            nothing was loaded.
     """
+    def _empty():
+        return (None, None, None) if return_path else (None, None)
+
     if not KEYPOINT_TRACKING_DIR.exists():
         logger.warning(f"Keypoint tracking directory not found: {KEYPOINT_TRACKING_DIR}")
-        return None, None
+        return _empty()
 
     animal_id, session_time, _ = parseSessionID(session_id)
     if animal_id is None:
         logger.warning(f"Could not parse session_id: {session_id}")
-        return None, None
+        return _empty()
 
     candidate_dirs = [d for d in KEYPOINT_TRACKING_DIR.iterdir()
                       if d.is_dir() and d.name.startswith(f'behavior_{animal_id}')]
     if not candidate_dirs:
         logger.info(f"No keypoint tracking data found for animal {animal_id}")
-        return None, None
+        return _empty()
 
     time_diffs = [abs((parseSessionID(d.name)[1] - session_time).total_seconds()) for d in candidate_dirs]
     best_idx = int(np.argmin(time_diffs))
     if time_diffs[best_idx] > 60:
         logger.info(f"Closest keypoint session is {time_diffs[best_idx]:.0f}s away — skipping")
-        return None, None
+        return _empty()
 
     matched_dir = candidate_dirs[best_idx]
     logger.info(f"Matched keypoint tracking session: {matched_dir.name}")
@@ -446,7 +590,7 @@ def load_keypoint_tracking(session_id):
         data = load_intermediate_data(matched_dir)
     except Exception as e:
         logger.warning(f"Failed to load intermediate data from {matched_dir}: {e}")
-        return None, None
+        return _empty()
 
     movs_table = _df_to_dynamic_table(
         data['movs'],
@@ -462,28 +606,77 @@ def load_keypoint_tracking(session_id):
     )
 
     logger.info(f"Built tongue_movements ({len(data['movs'])} rows) and tongue_kinematics ({len(data['kins'])} rows) tables")
+    if return_path:
+        return movs_table, kins_table, data_asset_dir(matched_dir)
     return movs_table, kins_table
 
 
-def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
+def data_asset_dir(path):
+    """
+    Reduce a path to the top-level data asset directory it lives in.
+
+    Data assets are the immediate children of the capsule data directory, e.g.
+    '/root/capsule/data/ecephys_713854_2024-03-05_12-01-40_sorted_curated' or
+    '/root/capsule/data/scratch_data'. Anything deeper (a file, a nested folder)
+    is rolled up to that asset so every reported path is at the same level.
+
+    Args:
+        path: Any path inside a data asset, or None
+
+    Returns:
+        The asset directory, None if path is None, or the path unchanged when it
+        does not live under the capsule data directory.
+    """
+    if path is None:
+        return None
+
+    path = os.path.abspath(str(path))
+    data_dir = os.path.abspath(str(capsule_directories()['data_dir']))
+
+    try:
+        rel = os.path.relpath(path, data_dir)
+    except ValueError:  # different drive on Windows
+        return path
+    if rel == os.curdir or rel.startswith(os.pardir):
+        return path
+
+    return os.path.join(data_dir, rel.split(os.sep)[0])
+
+
+def merge_unit_tables(session_id, data_type='curated', return_nwb=False, return_paths=False):
     """
     Merge unit tables from custom pickle and NWB kilosort data.
 
     Args:
         session_id: Session identifier
         data_type: 'curated' or 'raw'
-        return_nwb: If True, return (merged_df, ephys_nwb). If False, return just merged_df
+        return_nwb: If True, also return ephys_nwb
+        return_paths: If True, also return a dict of the top-level data assets the
+            data was loaded from (see data_asset_dir), with keys 'custom_unit_tbl'
+            and 'ephys_nwb'
 
     Returns:
-        If return_nwb=False: Merged DataFrame with mapped column names, or None if merge fails
-        If return_nwb=True: Tuple of (merged_df, ephys_nwb) or (None, None) if merge fails
+        merged_df (DataFrame with mapped column names, or None if merge fails), with
+        ephys_nwb appended when return_nwb=True and the paths dict appended when
+        return_paths=True. Returned as a tuple whenever either flag is set.
     """
+    paths = {'custom_unit_tbl': None, 'ephys_nwb': None}
+
+    def _result(merged_df, ephys_nwb):
+        out = (merged_df,)
+        if return_nwb:
+            out += (ephys_nwb,)
+        if return_paths:
+            out += (paths,)
+        return out if len(out) > 1 else merged_df
+
     # 1. Load custom unit table (use summary version)
     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
     if custom_unit_tbl is None or len(custom_unit_tbl) == 0:
         logger.warning(f"No custom unit table found for {session_id}")
-        return (None, None) if return_nwb else None
+        return _result(None, None)
 
+    paths['custom_unit_tbl'] = data_asset_dir(session_dirs(session_id).get(f'opto_dir_{data_type}'))
     logger.info(f"Loaded {len(custom_unit_tbl)} units from custom table")
 
     # 2. Load NWB kilosort data
@@ -491,12 +684,13 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     nwb_path = session_dir.get(f'nwb_dir_{data_type}')
     if nwb_path is None or not os.path.exists(nwb_path):
         logger.warning(f"NWB file not found at {nwb_path}")
-        return (None, None) if return_nwb else None
+        return _result(None, None)
 
     ephys_nwb = load_nwb_from_filename(nwb_path)
+    paths['ephys_nwb'] = data_asset_dir(nwb_path)
     if ephys_nwb.units is None:
         logger.warning(f"No units in NWB file for {session_id}")
-        return (None, None) if return_nwb else None
+        return _result(None, None)
 
     nwb_unit_tbl = ephys_nwb.units.to_dataframe()
     logger.info(f"Loaded {len(nwb_unit_tbl)} units from NWB")
@@ -511,7 +705,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         nwb_id_col = 'unit_id'
     else:
         logger.error(f"NWB units table has neither 'ks_unit_id' nor 'unit_id'. Columns: {list(nwb_unit_tbl.columns)}")
-        return None
+        return _result(None, None)
 
     logger.info(f"Using NWB ID column: '{nwb_id_col}' for alignment")
     nwb_unit_ids = set(nwb_unit_tbl[nwb_id_col].values)
@@ -521,7 +715,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         logger.error(f"No common units found between custom and NWB tables!")
         logger.error(f"  Custom unit_ids ({len(custom_unit_ids)}): {sorted(list(custom_unit_ids))[:10]}")
         logger.error(f"  NWB {nwb_id_col} ({len(nwb_unit_ids)}): {sorted(list(nwb_unit_ids))[:10]}")
-        return None
+        return _result(None, None)
 
     if len(custom_unit_tbl) != len(common_ids):
         only_custom = custom_unit_ids - nwb_unit_ids
@@ -571,13 +765,11 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
 
     logger.info(f"Merged table has {len(merged_df)} rows and {len(merged_df.columns)} columns")
 
-    if return_nwb:
-        return merged_df, ephys_nwb
-    else:
-        return merged_df
+    return _result(merged_df, ephys_nwb)
 
 
-def build_combined_nwb(session_id, data_type='curated', save_file=None, add_metadata=False):
+def build_combined_nwb(session_id, data_type='curated', save_file=None, add_metadata=False,
+                       return_paths=False):
     """
     Build a complete NWB file with available data modalities.
 
@@ -590,12 +782,18 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         session_id: Session identifier
         data_type: 'curated' or 'raw'
         save_file: Path to save NWB file (if None, returns in-memory only)
-        add_metadata: If True, bundle the raw AIND metadata JSON files into a
-            LabMetaData container (see add_aind_metadata). Placeholder metadata,
-            expected to be replaced by properly typed metadata later.
+        add_metadata: If True, bundle the AIND metadata JSON files from every data
+            asset the session drew from into a LabMetaData container (see
+            add_aind_metadata). Placeholder metadata, expected to be replaced by
+            properly typed metadata later.
+        return_paths: If True, also return a dict of the top-level data asset each
+            modality was loaded from (see data_asset_dir; None for modalities that
+            were not found, and 'aind_metadata' holds a list since it can pool
+            several assets).
 
     Returns:
-        Tuple of (save_path, nwb_object, data_modalities_dict)
+        Tuple of (save_path, nwb_object, data_modalities_dict), with data_paths_dict
+        appended when return_paths=True.
         data_modalities_dict has keys:
             'behavior_trials': bool - whether trial data is included
             'ephys_units': bool - whether ephys units are included
@@ -628,17 +826,29 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         'nwb_saved': None,  # Timestamp when NWB file was saved (if save_file provided)
     }
 
+    # Track the directory each modality's data was loaded from
+    data_paths = {
+        'custom_unit_tbl': None,
+        'ephys_nwb': None,
+        'behavior_trials': None,
+        'behavior_nwb': None,
+        'pupil': None,
+        'tongue_movements': None,
+        'keypoint_tracking': None,
+        'aind_metadata': None,
+    }
+
     # 1. Merge unit tables (optional - may not exist for all sessions)
     # Get both merged units and ephys NWB for metadata
-    merge_result = merge_unit_tables(session_id, data_type, return_nwb=True)
-    if merge_result[0] is None:
+    merged_units, ephys_nwb, unit_paths = merge_unit_tables(
+        session_id, data_type, return_nwb=True, return_paths=True
+    )
+    if merged_units is None:
         logger.warning(f"No unit tables to merge for {session_id} - will create NWB with behavior/acquisition only")
-        merged_units = None
-        ephys_nwb = None
     else:
-        merged_units, ephys_nwb = merge_result
         logger.info(f"Merged {len(merged_units)} units")
         data_modalities['ephys_units'] = True
+        data_paths.update(unit_paths)
 
     # 2. Load session/trial table (optional - may not exist for all sessions)
     # Try raw version first, then processed version
@@ -646,12 +856,14 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     if session_tbl is not None and len(session_tbl) > 0:
         logger.info(f"Loaded {len(session_tbl)} trials from raw behavior NWB")
         data_modalities['beh_version'] = 'raw'
+        data_paths['behavior_trials'] = data_asset_dir(session_dirs(session_id).get('beh_fig_dir'))
     else:
         # Try processed version
         session_tbl = get_session_tbl(session_id, load_raw=False)
         if session_tbl is not None and len(session_tbl) > 0:
             logger.info(f"Loaded {len(session_tbl)} trials from processed behavior NWB")
             data_modalities['beh_version'] = 'processed'
+            data_paths['behavior_trials'] = data_asset_dir(session_dirs(session_id).get('beh_fig_dir'))
         else:
             logger.warning(f"No session table found for {session_id} - will create NWB without behavior trials")
             session_tbl = None
@@ -663,6 +875,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     behavior_nwb = None
     if os.path.exists(behavior_nwb_path):
         behavior_nwb = load_nwb_from_filename(behavior_nwb_path)
+        data_paths['behavior_nwb'] = data_asset_dir(session_dir['beh_fig_dir'])
         logger.info(f"Loaded behavior NWB from {behavior_nwb_path}")
     else:
         logger.warning(f"Behavior NWB not found at {behavior_nwb_path}")
@@ -890,6 +1103,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
             )
         new_nwb.processing['behavior'].add(pupil_data_to_timeseries(pupil_data))
         data_modalities['pupil'] = True
+        data_paths['pupil'] = data_asset_dir(session_dirs(session_id).get('sorted_dir_curated'))
         logger.info("Added pupil diameter TimeSeries to behavior processing module")
     else:
         logger.info("No pupil data available for this session")
@@ -898,8 +1112,8 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     # The movement table only comes from the pooled parquet asset; sessions missing from
     # that asset simply get no movement table. The keypoint asset's own movs table is
     # deliberately ignored (it duplicates the parquet one, minus the out_* columns).
-    movement_table = load_tongue_movements(session_id)
-    _, kins_table = load_keypoint_tracking(session_id)
+    movement_table, movement_dir = load_tongue_movements(session_id, return_path=True)
+    _, kins_table, keypoint_dir = load_keypoint_tracking(session_id, return_path=True)
 
     if movement_table is not None or kins_table is not None:
         if 'behavior' not in new_nwb.processing:
@@ -911,6 +1125,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     if movement_table is not None:
         new_nwb.processing['behavior'].add(movement_table)
         data_modalities['tongue_movements'] = True
+        data_paths['tongue_movements'] = movement_dir
         logger.info(f"Added {movement_table.name} DynamicTable to behavior processing module")
     else:
         logger.info("No tongue movement data available for this session")
@@ -918,16 +1133,31 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     if kins_table is not None:
         new_nwb.processing['behavior'].add(kins_table)
         data_modalities['keypoint_tracking'] = True
+        data_paths['keypoint_tracking'] = keypoint_dir
         logger.info("Added tongue_kinematics table to behavior processing module")
     else:
         logger.info("No keypoint tracking data available for this session")
 
-    # 7d. Attach the raw AIND metadata JSON files (if requested)
+    # 7d. Attach the AIND metadata JSON files (if requested). These are pooled from
+    # every data asset this session drew from — raw, sorted and processed alike, not
+    # just the raw asset — and load_aind_metadata deduplicates both the directories
+    # and the files themselves.
     if add_metadata:
-        meta_dict = load_aind_metadata(session_id)
+        # Processed/sorted assets first so their metadata wins over the raw asset's;
+        # processing.json is merged across all of them rather than overridden.
+        metadata_dirs = []
+        for value in data_paths.values():
+            if value is None:
+                continue
+            metadata_dirs.extend([value] if isinstance(value, str) else value)
+        metadata_dirs.append(session_dirs(session_id).get('raw_dir'))
+
+        meta_dict, meta_dirs = load_aind_metadata(session_id, dirs=metadata_dirs, return_path=True)
         if meta_dict is not None:
             add_aind_metadata(new_nwb, meta_dict)
             data_modalities['aind_metadata'] = True
+            # A list: metadata can be pooled from more than one data asset
+            data_paths['aind_metadata'] = meta_dirs
             logger.info(f"Added AIND metadata to lab_meta_data['{AIND_LAB_META_DATA_KEY}']")
         else:
             logger.info("No AIND metadata available for this session")
@@ -955,6 +1185,8 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     else:
         logger.info("Generated NWB in memory only (no file written)")
 
+    if return_paths:
+        return save_file, new_nwb, data_modalities, data_paths
     return save_file, new_nwb, data_modalities
 
 
@@ -973,12 +1205,17 @@ if __name__ == '__main__':
 
 
         # Test the full build_combined_nwb function
-        save_path, nwb, modalities = build_combined_nwb(session, data_type='curated', save_file=None)
+        save_path, nwb, modalities, paths = build_combined_nwb(
+            session, data_type='curated', save_file=None, return_paths=True
+        )
         if nwb is not None:
             print(f"\n✓ Success! Combined NWB created")
             print(f"  Trials: {len(nwb.trials) if nwb.trials is not None else 0} rows")
             print(f"  Units: {len(nwb.units) if nwb.units is not None else 0} rows")
             print(f"  Modalities: {', '.join(k for k, v in modalities.items() if v)}")
+            print("  Data assets:")
+            for key, path in paths.items():
+                print(f"    {key}: {path}")
 
             # Show sample columns
             if nwb.trials is not None:
