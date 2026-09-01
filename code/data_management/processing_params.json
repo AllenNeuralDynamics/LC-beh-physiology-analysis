@@ -39,10 +39,5 @@
     "fit_glm":
     {
         "max_lag": 5
-    },
-    "compute_spatial_crosscorr":
-    {
-        "data_type": "curated", 
-        "probe_type": "2"
     }
 }

@@ -1,16 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -ex
 
 # This is the master script for the capsule. When you click "Reproducible Run", the code in this file will execute.
-# Default behavior is check-only so automated triggers without extra arguments do not launch the full pipeline.
-# To force a real run manually:
-#   CAPSULE_RUN_MODE=execute bash code/run
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-dry_run=0
-
-if [[ $dry_run -eq 1 ]]; then
-    python -u "$SCRIPT_DIR/run_capsule.py" --check-only "$@"
-else
-    python -u "$SCRIPT_DIR/run_capsule.py" "$@"
-fi
+python -u run_capsule.py "$@"
