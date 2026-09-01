@@ -11,7 +11,7 @@ client = CodeOcean(domain="https://codeocean.allenneuraldynamics.org", token=os.
 # %%
 # load and parse data ids
 script_dir = os.path.dirname(os.path.abspath(__file__))
-datalist_dir = os.path.join(script_dir, 'session_assets.csv')
+datalist_dir = os.path.join(script_dir, 'session_assets_DRN.csv')
 data_df = pd.read_csv(datalist_dir)
 data_df = data_df[data_df['session_id'].notna() & (data_df['session_id'] != "")]
 
@@ -31,10 +31,10 @@ for curr_col in col_to_attach:
     all_ids.extend(curr_ids)
     all_mounts.extend(curr_mount)
 #%%
-all_ids = all_ids + ['7e919fa0-5c4a-427f-ad37-5db41715a491','76409af0-56fc-435b-a2b5-5b68650bd186'] #Alignments JL 260626, alignment JL 260710
+all_ids = all_ids + ['76409af0-56fc-435b-a2b5-5b68650bd186','eb4cddab-8c11-4131-8b0e-13f89d3f2b48'] #alignment JL 260710, 260817
 # all_mounts = all_mounts + ['all_behavior']
 #all_ids = all_ids + ['c1a35fd0-c3aa-47a8-ba40-288b1e39a86a', 'ac7c7961-9178-4bf9-9d66-0a426cf3cc24', '1a8bede7-bdc1-4b41-8290-bc0bdafdf019', 'c712751d-f744-4fe8-9657-93a7084eab22', 'adf4f98c-5015-4d23-81e3-359a9a5b6ec1', 'c712751d-f744-4fe8-9657-93a7084eab22']
-all_mounts = all_mounts + ['alignment_260626', 'alignment_260710']
+all_mounts = all_mounts + ['alignment_260710', 'alignment_260817']
 
 # Generate the list of DataAssetAttachParams objects
 all_mounts_new = []

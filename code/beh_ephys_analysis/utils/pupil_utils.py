@@ -1,7 +1,9 @@
 # %%
 import os
+import sys
 
 from pandas.core.frame import ensure_index_from_sequences
+sys.path.append('/root/capsule/code/beh_ephys_analysis')
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,10 +12,7 @@ import json
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 import re
-try:
-    from .beh_functions import session_dirs, get_unit_tbl, get_session_tbl, makeSessionDF
-except ImportError:
-    from beh_functions import session_dirs, get_unit_tbl, get_session_tbl, makeSessionDF
+from utils.beh_functions import session_dirs, get_unit_tbl, get_session_tbl, makeSessionDF
 from aind_dynamic_foraging_data_utils.nwb_utils import load_nwb_from_filename
 from scipy.interpolate import interp1d
 from scipy.stats import zscore

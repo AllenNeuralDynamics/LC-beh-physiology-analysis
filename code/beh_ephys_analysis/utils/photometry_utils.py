@@ -1,5 +1,7 @@
 # %%
 import os
+import sys
+sys.path.append('/root/capsule/code/beh_ephys_analysis')
 import pandas as pd
 import numpy as np
 import matplotlib.colors as mcolors
@@ -7,12 +9,8 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib.patches as patches
 import re
-try:
-    from .beh_functions import session_dirs, get_session_tbl, makeSessionDF
-    from .ephys_functions import plot_rate
-except ImportError:
-    from beh_functions import session_dirs, get_session_tbl, makeSessionDF
-    from ephys_functions import plot_rate
+from utils.beh_functions import session_dirs, get_session_tbl, makeSessionDF
+from utils.ephys_functions import plot_rate
 import platform
 import shutil
 

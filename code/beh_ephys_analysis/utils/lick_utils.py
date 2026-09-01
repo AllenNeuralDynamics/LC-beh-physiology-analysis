@@ -15,10 +15,7 @@ from scipy.io import loadmat
 from itertools import chain
 from scipy.signal import find_peaks
 from aind_dynamic_foraging_data_utils.nwb_utils import load_nwb_from_filename
-try:
-    from .beh_functions import session_dirs, get_session_tbl
-except ImportError:
-    from beh_functions import session_dirs, get_session_tbl
+from utils.beh_functions import session_dirs, get_session_tbl
 import matplotlib.gridspec as gridspec
 
 def clean_up_licks(licksL, licksR, crosstalk_thresh=100, rebound_thresh=50, plot=False):

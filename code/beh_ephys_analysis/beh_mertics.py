@@ -38,7 +38,7 @@ def kde_peak(x, bw_method='scott', step_size = 0.01):
     ys = kde(xs)
     return xs[np.argmax(ys)]
 
-def cal_beh_metrics(session, model_name='stan_qLearning_5params', save = False):
+def cal_beh_metrics(session, model_name='stan_qLearning_5params'):
     """
     Calculate behavioral metrics for a given session and model.
     
@@ -119,12 +119,9 @@ def cal_beh_metrics(session, model_name='stan_qLearning_5params', save = False):
                            'lick_lat_diff_mode': lick_lat_diff_mode, 'var_lat_diff_mode': var_lat_diff_mode})
 
     # save to .json file
-    if save:
-        json_file_path = os.path.join(session_dir['beh_fig_dir'], f'{session}_beh_metrics.json')
-        with open(json_file_path, 'w') as json_file:
-            json.dump(session_params, json_file, indent=4)
-    else:
-        return session_params
+    json_file_path = os.path.join(session_dir['beh_fig_dir'], f'{session}_beh_metrics.json')
+    with open(json_file_path, 'w') as json_file:
+        json.dump(session_params, json_file, indent=4)
 
 
 if __name__ == "__main__":

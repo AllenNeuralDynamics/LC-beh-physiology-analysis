@@ -168,7 +168,7 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
             ax.plot(timeWF, peakWaveform, color = 'k')
             ax.fill_between(timeWF, peakWaveform - peakSD/np.sqrt(499), peakWaveform + peakSD/np.sqrt(499), color = 'k', alpha = 0.1)
             ax.axhline(y=0, color = 'r', ls = '--')
-            ax.set_xlabel('Time (ms)', fontsize = fs)
+            ax.set_xlabel('Samples', fontsize = fs)
             ax.set_ylabel(r'$\mu$-Plot')
 
             # reward and no reward
@@ -974,11 +974,11 @@ def plot_alignments(session, data_type='curated', unit_ids=None, win_len = 0.5):
 
 if __name__ == '__main__': 
 
-    df = pd.read_csv('/root/capsule/code/data_management/session_assets_DRN_260622.csv')
+    df = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
     session_ids = df['session_id'].values
     session_ids = [session_id for session_id in session_ids if isinstance(session_id, str)]  # filter only behavior sessions
     model_name = None
-    data_type = 'curated'
+    data_type = 'raw'
     curate_time = True
     align_name = 'response'
     formula = 'spikes ~ 1 + outcome + choice'
@@ -987,22 +987,18 @@ if __name__ == '__main__':
         print(session)
         session_dir = session_dirs(session)
         if os.path.exists(os.path.join(session_dir['beh_fig_dir'], f'{session}.nwb')):
-            if session_dir['curated_dir_curated'] is not None:
+            if session_dir['curated_dir_raw'] is not None:
                 # if not os.path.exists(os.path.join(session_dirs(session)['ephys_dir_curated'],f'{session}_unit_beh_{align_name}.pdf')):
-                plot_unit_beh_session(session, data_type = 'curated', align_name = align_name, curate_time=curate_time, opto_only=True,
+                plot_unit_beh_session(session, data_type = 'raw', align_name = 'response', curate_time=curate_time, opto_only=True,
                             model_name = model_name, formula=formula,
                             pre_event=-1.5, post_event=3, binSize=0.2, stepSize=0.05,
                             units=None)
-                # else:
-                #     print(f'Already plotted {session} for curated data')
-            else:
-                print(f'No curated data for {session}')
-        # elif session_dir['curated_dir_raw'] is not None:
-        #     if not os.path.exists(os.path.join(session_dirs(session)['ephys_dir_raw'],f'{session}_unit_beh_{align_name}.pdf')):
-        #         plot_unit_beh_session(session, data_type = 'raw', align_name = align_name, curate_time=curate_time, 
-        #                         model_name = model_name, formula=formula,
-        #                         pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-        #                         units=None)
+                
+                plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', curate_time=curate_time, opto_only=True,
+                            model_name = model_name, formula=formula,
+                            pre_event=-1.5, post_event=3, binSize=0.2, stepSize=0.05,
+                            units=None)
+
         print('----------------------------------')
         print(f'Finished plotting behavior alignment for session {session}')
     # session = 'behavior_782394_2025-04-24_12-07-34'
@@ -1010,80 +1006,10 @@ if __name__ == '__main__':
     #                     model_name = model_name, formula=formula,
     #                     pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
     #                     units=[82])
-
-    # plot_unit_beh_session(session='behavior_808650_2025-09-23_14-49-57', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[5,48,67])
-    # plot_unit_beh_session(session='behavior_808650_2025-09-26_11-51-57', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[53])    
-    # plot_unit_beh_session(session='behavior_810888_2025-10-31_12-39-56', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[39,56,59])  
-    # plot_unit_beh_session(session='behavior_814515_2025-10-23_14-41-04', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[87,95,119]) 
-    # plot_unit_beh_session(session='behavior_826159_2026-01-22_12-58-47', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[51,145])                 
-    # plot_unit_beh_session(session='behavior_826159_2026-01-23_13-34-11', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[42,67,69,83,87,115,171,184]) 
-    # plot_unit_beh_session(session='behavior_826159_2026-01-26_15-15-12', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[5,18,20,22,23,25,26,27,29,30,35,39,41,45,54,60,61,62,63,64,129,150,152]) 
-    # plot_unit_beh_session(session='behavior_826159_2026-01-27_08-55-48', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[66,84,142])
-    # plot_unit_beh_session(session='behavior_826164_2026-01-27_11-14-13', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[15,17,25,59])
-    # plot_unit_beh_session(session='behavior_826164_2026-01-28_11-12-55', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[9,10,15,70,87])
-    # plot_unit_beh_session(session='behavior_826164_2026-01-29_11-09-03', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[136])
-    # plot_unit_beh_session(session='behavior_826164_2026-01-30_11-12-30', data_type = 'raw', align_name = 'response', curate_time=False, 
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[41,77,87,95,98])
-
-
-    # plot_unit_beh_session(session='behavior_835444_2026-02-17_13-56-45', data_type = 'raw', align_name = 'response', curate_time=False, #EOFError: Ran out of input
-    #             model_name = None, formula=formula,
-    #             pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-    #             units=[140,158]) 
-    plot_unit_beh_session(session='behavior_835444_2026-02-18_13-01-55', data_type = 'raw', align_name = 'response', curate_time=False, 
-                model_name = None, formula=formula,
-                pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-                units=[16,26,47,83,202,239])
-    plot_unit_beh_session(session='behavior_835444_2026-02-19_13-08-36', data_type = 'raw', align_name = 'response', curate_time=False, 
-                model_name = None, formula=formula,
-                pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-                units=[25,66,150,164])
-    plot_unit_beh_session(session='behavior_835444_2026-02-20_12-12-35', data_type = 'raw', align_name = 'response', curate_time=False, 
-                model_name = None, formula=formula,
-                pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-                units=[3,15,24,32,41,50])
-    plot_unit_beh_session(session='behavior_835451_2026-02-25_13-19-37', data_type = 'raw', align_name = 'response', curate_time=False, 
-                model_name = None, formula=formula,
-                pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-                units=[24,63,64,65,67,68,84,90,98,188,191])
-    plot_unit_beh_session(session='behavior_835451_2026-02-27_14-19-03', data_type = 'raw', align_name = 'response', curate_time=False, 
-                model_name = None, formula=formula,
-                pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-                units=[51,115,132,133])
     # Parallel(n_jobs=12)(delayed(process_session)(session) for session in session_ids[76:])
 
+for session in session_ids:
+    try:
+        process_session(session)
+    except:
+        print(f'Failed to process {session}')

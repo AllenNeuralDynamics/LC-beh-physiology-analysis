@@ -374,56 +374,87 @@ if __name__ == "__main__":
     import traceback
     from tqdm import tqdm
 
-    warnings.filterwarnings("ignore", category=UserWarning, module="spikeinterface")
+    warnings.filterwarnings(
+        "ignore",
+        category=UserWarning,
+        module="spikeinterface"
+    )
 
     data_type = "raw"
-    load_sorting_analyzer = True
-    opto_only = True
+    target = "soma"
 
-    session_assets = pd.read_csv("/root/capsule/code/data_management/session_assets.csv")
-    session_list = session_assets["session_id"].values
-
-    def process(session):
-        print(f"\n===== Processing {session} =====")
-        session_dir = session_dirs(session)
-
-        if session_dir.get("opto_dir_raw") is None:
-            print(f"Session {session}: no opto_dir_raw, skip.")
-            return
-
-        unit_tbl = get_unit_tbl(session, data_type, summary=True)
-        if unit_tbl is None:
-            print(f"Session {session}: no raw summary unit table, skip.")
-            return
-
-        if "peak_waveform_raw_fake_aligned" in unit_tbl.columns:
-            print(f"Session {session}: already processed, skip.")
-            return
-
-        print(f"Session {session}: running re_filter_opto_waveforms on raw")
-        re_filter_opto_waveforms(
-            session,
-            data_type,
-            opto_only=opto_only,
-            load_sorting_analyzer=load_sorting_analyzer,
-        )
-        print(f"Session {session}: done.")
+    session_assets = pd.read_csv(
+        "/root/capsule/code/data_management/session_assets.csv"
+    )
+    session_list = session_assets["session_id"].dropna().unique()
 
     failed_sessions = []
+    skipped_sessions = []
+    processed_sessions = []
 
-    for session in tqdm(session_list, desc="Re-filtering opto waveforms"):
+    for session in tqdm(session_list, desc="Generating opto summaries"):
         try:
-            process(session)
+            print(f"\n===== Checking {session} =====")
+
+            session_dir = session_dirs(session)
+
+            if session_dir.get(f"opto_dir_{data_type}") is None:
+                print(f"{session}: no opto_dir_{data_type}, skip.")
+                continue
+
+            summary_path = os.path.join(
+                session_dir[f"opto_dir_{data_type}"],
+                f"{session}_{data_type}_{target}_opto_tagging_summary.pkl"
+            )
+
+            # Check existing summary
+            if os.path.exists(summary_path):
+                with open(summary_path, "rb") as f:
+                    old_summary = pickle.load(f)
+
+                has_metrics = (
+                    "corr_max_p" in old_summary.columns
+                    and "euc_max_p" in old_summary.columns
+                )
+
+                if has_metrics:
+                    corr_missing = old_summary["corr_max_p"].isna().all()
+                    euc_missing = old_summary["euc_max_p"].isna().all()
+
+                    if not corr_missing and not euc_missing:
+                        print(
+                            f"{session}: corr/euc already present, skip."
+                        )
+                        skipped_sessions.append(session)
+                        continue
+
+            # Missing/stale summary -> regenerate
+            print(f"{session}: regenerating opto summary")
+
+            opto_summary_DRN(
+                session,
+                data_type=data_type,
+                target=target,
+                save=True,
+            )
+
+            processed_sessions.append(session)
+
         except Exception as e:
-            print(f"Session {session}: FAILED")
+            print(f"{session}: FAILED")
             print(f"Error: {e}")
             traceback.print_exc()
             failed_sessions.append(session)
 
     print("\n===== Finished =====")
-    print(f"Failed sessions ({len(failed_sessions)}):")
-    for session in failed_sessions:
-        print(session)
+    print(f"Regenerated: {len(processed_sessions)}")
+    print(f"Already OK:   {len(skipped_sessions)}")
+    print(f"Failed:       {len(failed_sessions)}")
+
+    if failed_sessions:
+        print("\nFailed sessions:")
+        for session in failed_sessions:
+            print(session)
 
 
 
