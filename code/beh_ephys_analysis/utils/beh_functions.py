@@ -1,4 +1,3 @@
-from utils.capsule_migration import CAPSULE_ROOT
 import numpy as np
 from scipy import stats
 import statsmodels.api as sm
@@ -14,10 +13,10 @@ from aind_dynamic_foraging_basic_analysis.plot.plot_foraging_session import plot
 from aind_dynamic_foraging_basic_analysis.licks.lick_analysis import load_data
 from aind_dynamic_foraging_data_utils.nwb_utils import load_nwb_from_filename
 try:
-    from .capsule_migration import capsule_directories
+    from .capsule_migration import capsule_directories, CAPSULE_ROOT
     from .mat_converter import load_df_from_mat
 except ImportError:
-    from capsule_migration import capsule_directories
+    from capsule_migration import capsule_directories, CAPSULE_ROOT 
     from mat_converter import load_df_from_mat
 from uuid import uuid4
 import json
