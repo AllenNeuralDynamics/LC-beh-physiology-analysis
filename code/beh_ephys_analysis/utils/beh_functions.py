@@ -1,4 +1,4 @@
-from utils.capsule_migration import CAPSULE_ROOT
+from .capsule_migration import CAPSULE_ROOT
 import numpy as np
 from scipy import stats
 import statsmodels.api as sm
