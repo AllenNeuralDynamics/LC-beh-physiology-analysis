@@ -145,7 +145,7 @@ def packaging_processing(source_names):
         code=Code(
             url="https://github.com/AllenNeuralDynamics/aind-beh-ephys-analysis",
             run_script="code/data_management/build_merged_nwb.py",
-            commit_hash="",
+            commit_hash="130d64a014df967a46e8cf67acc3b597af2753fe",
             input_data=[DataAsset(name=name) for name in source_names]
         )
     )
@@ -205,7 +205,7 @@ def write_session_metadata(session_id, include_tongue=True, include_keypoint=Tru
         )
     derived = Metadata(
             name=derived_dd.name,
-            location="placeholder_location",
+            location=f"s3://aind-open-data/{derived_dd.name}",
             data_description=derived_dd,
             subject=base_md.subject,
             procedures=procedures_empty,
@@ -216,6 +216,7 @@ def write_session_metadata(session_id, include_tongue=True, include_keypoint=Tru
         )
     # fill invalid procedures
     derived.procedures = base_md.procedures
+    return derived
 
 if __name__ == "__main__":
     example_sessions = [
@@ -233,3 +234,4 @@ for id in example_sessions[:]:
     os.makedirs(f"/scratch/{id}", exist_ok=True)
     derived = write_session_metadata(id)
     derived.write_standard_files(output_directory=f"/scratch/{id}")
+    derived.write_standard_file(output_directory=f"/scratch/{id}")

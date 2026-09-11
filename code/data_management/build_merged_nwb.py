@@ -30,6 +30,7 @@ from utils.beh_functions import get_session_tbl, get_unit_tbl, session_dirs, par
 from utils.pupil_utils import load_pupil
 from pathlib import Path
 from hdmf.common import DynamicTable, VectorData
+from .build_nwb_metadata import write_session_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -119,45 +120,6 @@ def aind_metadata_type():
     load_namespaces(str(outdir / namespace_name))
 
     return get_class(AIND_NEURODATA_TYPE, AIND_NAMESPACE)
-
-
-def load_aind_metadata(session_id):
-    """
-    Load the raw AIND metadata JSON files for a session.
-
-    Reads every *.json in the session's raw data directory into one dict keyed by
-    filename stem (e.g. {'subject': {...}, 'procedures': {...}, 'rig': {...}}).
-
-    Args:
-        session_id: Session identifier
-
-    Returns:
-        dict keyed by filename stem, or None if no metadata files were found.
-    """
-    raw_dir = session_dirs(session_id).get('raw_dir')
-    if raw_dir is None or not os.path.exists(raw_dir):
-        logger.warning(f"Raw data directory not found for {session_id}")
-        return None
-
-    meta_files = sorted(glob.glob(os.path.join(raw_dir, '*.json')))
-    if not meta_files:
-        logger.info(f"No metadata JSON files found in {raw_dir}")
-        return None
-
-    meta_dict = {}
-    for path in meta_files:
-        key = os.path.splitext(os.path.basename(path))[0]
-        try:
-            with open(path, 'r') as f:
-                meta_dict[key] = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Could not read metadata file {path}: {e}")
-
-    if not meta_dict:
-        return None
-
-    logger.info(f"Loaded {len(meta_dict)} metadata files: {', '.join(meta_dict)}")
-    return meta_dict
 
 
 def add_aind_metadata(nwb_file, meta_dict):
@@ -933,9 +895,9 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
 
     # 7d. Attach the raw AIND metadata JSON files (if requested)
     if add_metadata:
-        meta_dict = load_aind_metadata(session_id)
-        if meta_dict is not None:
-            add_aind_metadata(new_nwb, meta_dict)
+        md = write_session_metadata(session_id, include_tongue=movement_table is not None, include_keypoint=True)
+        if md is not None:
+            add_aind_metadata(new_nwb, md.model_dump())
             data_modalities['aind_metadata'] = True
             logger.info(f"Added AIND metadata to lab_meta_data['{AIND_LAB_META_DATA_KEY}']")
         else:
