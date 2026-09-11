@@ -30,12 +30,11 @@ from utils.beh_functions import get_session_tbl, get_unit_tbl, session_dirs, par
 from utils.pupil_utils import load_pupil
 from pathlib import Path
 from hdmf.common import DynamicTable, VectorData
-from aind_dynamic_foraging_behavior_video_analysis.ephys.tongue_ephys import load_intermediate_data
 
 logger = logging.getLogger(__name__)
 
 # Tongue movement data
-TONGUE_MOVEMENT_DATA_DIR = Path('/root/capsule/data/all_tongue_movements_04022026')
+TONGUE_MOVEMENT_DATA_DIR = Path('/root/capsule/data/all_tongue_movements')
 TONGUE_MOVEMENT_PARQUET = TONGUE_MOVEMENT_DATA_DIR / 'all_tongue_movements_04022026.parquet'
 KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings_20260403')
 
@@ -72,6 +71,16 @@ KNOWN_ARRAY_COLUMNS = {
     'waveform_on_peak_channel_of_raw_waveform', 'waveform_on_peak_channel_of_aligned_raw_waveform',
     'peak_waveform_fake_raw', 'peak_waveform_aligned_fake_raw',
 }
+def load_intermediate_data(session_dir: Path) -> dict:
+    """Load the four intermediate parquet tables for a session."""
+    idir = session_dir / "intermediate_data"
+    return {
+        "movs":   pd.read_parquet(idir / "tongue_movs.parquet"),
+        "trials": pd.read_parquet(idir / "nwb_df_trials.parquet"),
+        "licks":  pd.read_parquet(idir / "nwb_df_licks.parquet"),
+        "kins":   pd.read_parquet(idir / "tongue_kins.parquet"),
+        "events": pd.read_parquet(idir / "nwb_df_events.parquet"),
+    }
 
 @functools.cache
 def aind_metadata_type():
