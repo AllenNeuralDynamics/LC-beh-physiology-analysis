@@ -145,7 +145,7 @@ def packaging_processing(source_names):
         code=Code(
             url="https://github.com/AllenNeuralDynamics/aind-beh-ephys-analysis",
             run_script="code/data_management/build_merged_nwb.py",
-            commit_hash="130d64a014df967a46e8cf67acc3b597af2753fe",
+            commit_hash="fdee4a650c1c9687564c44c422a56838aca8e3a7",
             input_data=[DataAsset(name=name) for name in source_names]
         )
     )
