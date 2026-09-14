@@ -123,7 +123,7 @@ def create_session_meta(session_id):
 TONGUE_MOVEMENT_ASSET_NAME = "LC-ephys-tonguemovements_2026-08-28_00-00-00"
 KEYPOINT_ASSET_NAME = "keypoint-tracking-bottomview-LCrecordings_2026-04-03_18-07-14"
 TONGUE_MOVEMENT_DATA_DIR = Path('/root/capsule/data/all_tongue_movements')
-KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings_20260403')
+KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings')
 
 def get_processing_subset(session_id, asset_path):
     p = Processing.model_validate_json((asset_path / "processing.json").read_text())
@@ -230,8 +230,8 @@ if __name__ == "__main__":
     'behavior_749472_2025-01-09_13-56-02',
     'behavior_754896_2025-01-03_17-20-19'
 ]
-for id in example_sessions[:]:
-    os.makedirs(f"/scratch/{id}", exist_ok=True)
-    derived = write_session_metadata(id)
-    derived.write_standard_files(output_directory=f"/scratch/{id}")
-    derived.write_standard_file(output_directory=f"/scratch/{id}")
+    for id in example_sessions[:]:
+        os.makedirs(f"/scratch/{id}", exist_ok=True)
+        derived = write_session_metadata(id)
+        derived.write_standard_files(output_directory=f"/scratch/{id}")
+        derived.write_standard_file(output_directory=f"/scratch/{id}")

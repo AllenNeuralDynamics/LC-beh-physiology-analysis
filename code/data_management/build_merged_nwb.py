@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Tongue movement data
 TONGUE_MOVEMENT_DATA_DIR = Path('/root/capsule/data/all_tongue_movements')
 TONGUE_MOVEMENT_PARQUET = TONGUE_MOVEMENT_DATA_DIR / 'all_tongue_movements_04022026.parquet'
-KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings_20260403')
+KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings')
 
 # AIND metadata extension: the raw metadata JSON files are bundled as a single JSON
 # blob in a LabMetaData container. Placeholder for now — expected to be replaced by
