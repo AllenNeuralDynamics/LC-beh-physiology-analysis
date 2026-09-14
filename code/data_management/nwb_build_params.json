@@ -1,0 +1,11 @@
+{
+  "build_one": {
+    "data_type": "curated",
+    "add_metadata": false
+  },
+  "parallel": {
+    "n_jobs": 8,
+    "backend": "loky",
+    "verbose": 10
+  }
+}
