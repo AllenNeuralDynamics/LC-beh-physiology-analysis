@@ -141,6 +141,8 @@ def main() -> int:
     """CLI entry point."""
     try:
         return run()
+    try:
+        return run()
     except (FileNotFoundError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
         return 1
