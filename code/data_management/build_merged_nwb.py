@@ -442,18 +442,26 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
 
     Args:
         session_id: Session identifier
-        data_type: 'curated' or 'raw'
-        return_nwb: If True, return (merged_df, ephys_nwb). If False, return just merged_df
+        data_type: 'curated' or 'raw'. If 'curated' and no curated unit table
+            exists, falls back to 'raw'.
+        return_nwb: If True, return (merged_df, ephys_nwb, data_type_used).
+            If False, return just merged_df
 
     Returns:
         If return_nwb=False: Merged DataFrame with mapped column names, or None if merge fails
-        If return_nwb=True: Tuple of (merged_df, ephys_nwb) or (None, None) if merge fails
+        If return_nwb=True: Tuple of (merged_df, ephys_nwb, data_type_used), where
+            data_type_used is the version actually loaded ('curated' or 'raw'),
+            or (None, None, None) if merge fails
     """
     # 1. Load custom unit table (use summary version)
     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
+    if custom_unit_tbl is None and data_type == 'curated':
+        logger.info(f"No curated unit table for {session_id} - falling back to raw")
+        data_type = 'raw'
+        custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
     if custom_unit_tbl is None or len(custom_unit_tbl) == 0:
         logger.warning(f"No custom unit table found for {session_id}")
-        return (None, None) if return_nwb else None
+        return (None, None, None) if return_nwb else None
 
     logger.info(f"Loaded {len(custom_unit_tbl)} units from custom table")
 
@@ -462,12 +470,12 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     nwb_path = session_dir.get(f'nwb_dir_{data_type}')
     if nwb_path is None or not os.path.exists(nwb_path):
         logger.warning(f"NWB file not found at {nwb_path}")
-        return (None, None) if return_nwb else None
+        return (None, None, None) if return_nwb else None
 
     ephys_nwb = load_nwb_from_filename(nwb_path)
     if ephys_nwb.units is None:
         logger.warning(f"No units in NWB file for {session_id}")
-        return (None, None) if return_nwb else None
+        return (None, None, None) if return_nwb else None
 
     nwb_unit_tbl = ephys_nwb.units.to_dataframe()
     logger.info(f"Loaded {len(nwb_unit_tbl)} units from NWB")
@@ -482,7 +490,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         nwb_id_col = 'unit_id'
     else:
         logger.error(f"NWB units table has neither 'ks_unit_id' nor 'unit_id'. Columns: {list(nwb_unit_tbl.columns)}")
-        return None
+        return (None, None, None) if return_nwb else None
 
     logger.info(f"Using NWB ID column: '{nwb_id_col}' for alignment")
     nwb_unit_ids = set(nwb_unit_tbl[nwb_id_col].values)
@@ -492,7 +500,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         logger.error(f"No common units found between custom and NWB tables!")
         logger.error(f"  Custom unit_ids ({len(custom_unit_ids)}): {sorted(list(custom_unit_ids))[:10]}")
         logger.error(f"  NWB {nwb_id_col} ({len(nwb_unit_ids)}): {sorted(list(nwb_unit_ids))[:10]}")
-        return None
+        return (None, None, None) if return_nwb else None
 
     if len(custom_unit_tbl) != len(common_ids):
         only_custom = custom_unit_ids - nwb_unit_ids
@@ -543,7 +551,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     logger.info(f"Merged table has {len(merged_df)} rows and {len(merged_df.columns)} columns")
 
     if return_nwb:
-        return merged_df, ephys_nwb
+        return merged_df, ephys_nwb, data_type
     else:
         return merged_df
 
@@ -559,7 +567,9 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
 
     Args:
         session_id: Session identifier
-        data_type: 'curated' or 'raw'
+        data_type: 'curated' or 'raw'. 'curated' falls back to 'raw' when no
+            curated unit table exists (the version used is reported as
+            'ephys_version' in the returned modalities dict)
         save_file: Path to save NWB file (if None, returns in-memory only)
         add_metadata: If True, bundle the raw AIND metadata JSON files into a
             LabMetaData container (see add_aind_metadata). Placeholder metadata,
@@ -578,6 +588,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
             'keypoint_tracking': bool - whether the tongue_kinematics table is included
             'aind_metadata': bool - whether the AIND metadata blob is included
             'beh_version': str - 'raw', 'processed', or 'none'
+            'ephys_version': str - unit table version actually used: 'curated', 'raw', or 'none'
             'nwb_created': str - ISO timestamp when NWB object was created
             'nwb_saved': str or None - ISO timestamp when NWB was saved to file (None if not saved)
     """
@@ -595,6 +606,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         'keypoint_tracking': False,
         'aind_metadata': False,
         'beh_version': 'none',  # 'raw', 'processed', or 'none'
+        'ephys_version': 'none',  # unit table version actually used: 'curated', 'raw', or 'none'
         'nwb_created': None,  # Timestamp when NWB object was created
         'nwb_saved': None,  # Timestamp when NWB file was saved (if save_file provided)
     }
@@ -607,9 +619,10 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         merged_units = None
         ephys_nwb = None
     else:
-        merged_units, ephys_nwb = merge_result
-        logger.info(f"Merged {len(merged_units)} units")
+        merged_units, ephys_nwb, data_type = merge_result
+        logger.info(f"Merged {len(merged_units)} units from the {data_type} unit table")
         data_modalities['ephys_units'] = True
+        data_modalities['ephys_version'] = data_type
 
     # 2. Load session/trial table (optional - may not exist for all sessions)
     # Try raw version first, then processed version
