@@ -590,6 +590,10 @@
 			"mount": "behavior_ZS062_2021-03-26_18-45-54_raw_data"
 		},
 		{
+			"id": "3f03b848-6839-4bad-b924-f5a63fde3b1f",
+			"mount": "keypoint_tracking_bottomview_LCrecordings"
+		},
+		{
 			"id": "3f340001-2d45-47ed-be8f-f7194ec829b0",
 			"mount": "behavior_724172_2024-10-01_11-20-11_raw_data"
 		},

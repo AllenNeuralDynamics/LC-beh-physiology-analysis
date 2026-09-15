@@ -55,7 +55,9 @@ RUN pip install -U --no-cache-dir \
     codeocean==0.14.0 \
     pandas==2.3.2 \
     scikit-image==0.25.2 \
-    aind_data_schema==2.6.0 \
+    aind_data_schema==2.9.0 \
+    aind-metadata-upgrader==0.17.12 \
+    aind-data-access-api==1.10.0 \
     openpyxl==3.1.5 \
     pycircstat2==0.1.15 \
     scanpy==1.12.1 \
