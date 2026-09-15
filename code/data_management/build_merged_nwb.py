@@ -667,6 +667,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         session_start_time=session_start_time,
         session_id=source_session_id,
         institution='Allen Institute for Neural Dynamics',
+        source_script='https://github.com/AllenNeuralDynamics/LC-beh-physiology-analysis/blob/pack/code/data_management/build_merged_nwb.py'
     )
 
     # Track creation time
