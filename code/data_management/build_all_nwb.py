@@ -16,8 +16,9 @@ build_combined_nwb() once per session in a joblib worker and returns a flat
 result row, exactly as the notebook does.
 
 Build parameters come from a JSON file in code/data_management (created with
-defaults if absent) and a copy is written into the results folder so every run
-records what it was given.
+defaults if absent), can be overridden per run with --n-jobs / --add-metadata,
+and a copy is written into the results folder so every run records what it was
+given.
 
 Outputs, all under --results-dir (default /root/capsule/results):
     nwb/<session>_combined.nwb.zarr   the zarr stores
@@ -28,7 +29,7 @@ Outputs, all under --results-dir (default /root/capsule/results):
 
 Usage:
     python build_all_nwb.py --mode test
-    python build_all_nwb.py --mode production --n-jobs 8
+    python build_all_nwb.py --mode production --n-jobs 8 --add-metadata
 """
 import argparse
 import io
@@ -274,6 +275,8 @@ def main(argv=None):
                         help='where the NWB stores, logs, params copy and summary go')
     parser.add_argument('--n-jobs', type=int, default=None,
                         help='override parallel.n_jobs from the params file (memory-bound, not CPU-bound)')
+    parser.add_argument('--add-metadata', action=argparse.BooleanOptionalAction, default=None,
+                        help='override build_one.add_metadata from the params file: bundle the raw AIND metadata JSON into each NWB')
     parser.add_argument('--fail-on-error', action='store_true',
                         help='exit nonzero if any session failed, instead of only reporting it')
     args = parser.parse_args(argv)
@@ -289,9 +292,11 @@ def main(argv=None):
     logging.info(f"mode={args.mode} results_dir={results_dir}")
 
     params = load_params(args.params)
-    # Record what this run was actually given, defaults filled in and --n-jobs applied.
+    # Record what this run was actually given, defaults filled in and the CLI overrides applied.
     if args.n_jobs is not None:
         params['parallel']['n_jobs'] = args.n_jobs
+    if args.add_metadata is not None:
+        params['build_one']['add_metadata'] = args.add_metadata
     params_copy = os.path.join(results_dir, 'nwb_build_params.json')
     with open(params_copy, 'w') as f:
         json.dump(params, f, indent=2)
