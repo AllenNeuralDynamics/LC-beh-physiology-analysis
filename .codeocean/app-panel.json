@@ -1,0 +1,23 @@
+{
+	"version": 1,
+	"parameters": [
+		{
+			"id": "VSu4SGslnV6tg8HG",
+			"name": "processing",
+			"description": "Select type of processing",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "pack_nwb",
+			"required": true
+		},
+		{
+			"id": "6NJXc3ps6BJRTB7n",
+			"name": "run_type",
+			"description": "Select type of run, test or full",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "test",
+			"required": true
+		}
+	]
+}
