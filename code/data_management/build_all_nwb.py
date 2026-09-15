@@ -153,6 +153,8 @@ def gather_sessions(mode):
             for name in SESSION_ASSET_CSVS
         ]
         df = pd.concat(dfs)
+        # drop rows with no raw data asset: nothing to build from
+        df = df[df['raw_data'].notna()]
         session_ids = df['session_id'].values
         # filter only behavior sessions (blank rows in the CSVs come through as NaN)
         session_ids = [session_id for session_id in session_ids if isinstance(session_id, str)]

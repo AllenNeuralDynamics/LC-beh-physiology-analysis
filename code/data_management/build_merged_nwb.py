@@ -72,6 +72,20 @@ KNOWN_ARRAY_COLUMNS = {
     'waveform_on_peak_channel_of_raw_waveform', 'waveform_on_peak_channel_of_aligned_raw_waveform',
     'peak_waveform_fake_raw', 'peak_waveform_aligned_fake_raw',
 }
+
+# Modalities that make a session worth writing. If none of them are present the NWB
+# would carry nothing but session metadata, so build_combined_nwb skips saving and
+# reports NO_VALID_DATA as the path instead.
+REQUIRED_MODALITIES = (
+    'behavior_trials',
+    'ephys_units',
+    'FP',
+    'pupil',
+    'tongue_movements',
+    'keypoint_tracking',
+)
+NO_VALID_DATA = 'no valid data'
+
 def load_intermediate_data(session_dir: Path) -> dict:
     """Load the four intermediate parquet tables for a session."""
     idir = session_dir / "intermediate_data"
@@ -455,10 +469,11 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     """
     # 1. Load custom unit table (use summary version)
     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
-    if custom_unit_tbl is None and data_type == 'curated':
-        logger.info(f"No curated unit table for {session_id} - falling back to raw")
-        data_type = 'raw'
-        custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
+    # commented out to make sure data is consistent with what is used in manuscript
+    # if custom_unit_tbl is None and data_type == 'curated':
+    #     logger.info(f"No curated unit table for {session_id} - falling back to raw")
+    #     data_type = 'raw'
+    #     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
     if custom_unit_tbl is None or len(custom_unit_tbl) == 0:
         logger.warning(f"No custom unit table found for {session_id}")
         return (None, None, None) if return_nwb else None
@@ -577,6 +592,9 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
 
     Returns:
         Tuple of (save_path, nwb_object, data_modalities_dict)
+        save_path is the written store path, None if save_file was None, or the
+        string NO_VALID_DATA ('no valid data') if none of REQUIRED_MODALITIES were
+        found - in that case nothing is written and 'nwb_saved' stays None.
         data_modalities_dict has keys:
             'behavior_trials': bool - whether trial data is included
             'ephys_units': bool - whether ephys units are included
@@ -922,7 +940,14 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     included_modalities = [k for k, v in data_modalities.items() if v]
     logger.info(f"Data modalities included: {', '.join(included_modalities) if included_modalities else 'none'}")
 
-    # 9. Save if requested (zarr backend; the store is a directory, so make sure
+    # 9. Nothing but metadata: not worth a file, so report it in place of the path
+    if not any(data_modalities[modality] for modality in REQUIRED_MODALITIES):
+        logger.warning(
+            f"No valid data for {session_id} (none of {', '.join(REQUIRED_MODALITIES)}) - skipping save"
+        )
+        return NO_VALID_DATA, new_nwb, data_modalities
+
+    # 10. Save if requested (zarr backend; the store is a directory, so make sure
     # the path carries the .zarr suffix rather than collide with an .nwb file)
     if save_file is not None:
         if not save_file.endswith('.zarr'):
