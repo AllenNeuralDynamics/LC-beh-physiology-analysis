@@ -4,7 +4,7 @@
 		{
 			"id": "VSu4SGslnV6tg8HG",
 			"name": "processing",
-			"description": "Select type of processing",
+			"description": "Select type of processing, pack_nwb, analysis, data_attachment",
 			"type": "text",
 			"value_type": "string",
 			"default_value": "pack_nwb",
@@ -12,11 +12,29 @@
 		},
 		{
 			"id": "6NJXc3ps6BJRTB7n",
-			"name": "run_type",
+			"name": "mode",
 			"description": "Select type of run, test or full",
 			"type": "text",
 			"value_type": "string",
 			"default_value": "test",
+			"required": true
+		},
+		{
+			"id": "ipRuZ7LAZX8K4LzN",
+			"name": "dry_run",
+			"description": "Dry run or not",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "True",
+			"required": true
+		},
+		{
+			"id": "uhqG8AVGNd8d88Dv",
+			"name": "add_metadata",
+			"description": "Bundle the AIND metadata JSON into each NWB (pack_nwb only)",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "False",
 			"required": true
 		}
 	]
