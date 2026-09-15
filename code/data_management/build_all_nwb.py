@@ -172,37 +172,6 @@ def gather_sessions(mode):
     return [s for s in session_ids if s not in excluded]
 
 
-def _json_default(obj):
-    """Fallback encoder: ISO strings for date/datetime/time, str() for the rest."""
-    if hasattr(obj, 'isoformat'):
-        return obj.isoformat()
-    return str(obj)
-
-
-def patch_metadata_json_encoding():
-    """Let add_metadata=True survive metadata fields that json.dumps can't encode.
-
-    build_combined_nwb calls add_aind_metadata(nwb, md.model_dump()), and a
-    python-mode model_dump leaves date objects behind, so json.dumps raises
-    "Object of type date is not JSON serializable". The real fix is one word
-    upstream -- model_dump(mode='json') in build_merged_nwb.py -- but that file
-    isn't ours to edit, so wrap the function from out here instead. Delete this
-    once upstream handles it.
-
-    Called from inside the worker: the patch mutates another module, so it does
-    not travel with the pickled task. Idempotent, so re-used workers are fine.
-    """
-    if getattr(build_merged_nwb.add_aind_metadata, '_json_safe', False):
-        return
-    original = build_merged_nwb.add_aind_metadata
-
-    def add_aind_metadata_json_safe(nwb_file, meta_dict):
-        return original(nwb_file, json.loads(json.dumps(meta_dict, default=_json_default)))
-
-    add_aind_metadata_json_safe._json_safe = True
-    build_merged_nwb.add_aind_metadata = add_aind_metadata_json_safe
-
-
 def build_one(session, save_dir, log_dir, **kwargs):
     """Build + save one session and return a flat result row.
 
@@ -229,7 +198,6 @@ def build_one(session, save_dir, log_dir, **kwargs):
 
     started = datetime.now()
     try:
-        patch_metadata_json_encoding()
         # build_combined_nwb writes zarr, so it returns the actual store path (save_file + '.zarr')
         kwargs['save_file'] = os.path.join(save_dir, f"{session}_combined.nwb")
         logging.info(f"Building {session}: {kwargs}")

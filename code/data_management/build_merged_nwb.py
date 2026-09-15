@@ -30,7 +30,7 @@ from utils.beh_functions import get_session_tbl, get_unit_tbl, session_dirs, par
 from utils.pupil_utils import load_pupil
 from pathlib import Path
 from hdmf.common import DynamicTable, VectorData
-from .build_nwb_metadata import write_session_metadata
+from data_management.build_nwb_metadata import write_session_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -930,7 +930,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     if add_metadata:
         md = write_session_metadata(session_id, include_tongue=movement_table is not None, include_keypoint=True)
         if md is not None:
-            add_aind_metadata(new_nwb, md.model_dump())
+            add_aind_metadata(new_nwb, md.model_dump_json())
             data_modalities['aind_metadata'] = True
             logger.info(f"Added AIND metadata to lab_meta_data['{AIND_LAB_META_DATA_KEY}']")
         else:
