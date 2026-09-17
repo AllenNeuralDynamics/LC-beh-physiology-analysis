@@ -782,9 +782,11 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         logger.info("Using default metadata (no source NWB available)")
 
     # 4. Create NWB file
+    animal_id, session_time, _ = parseSessionID(session_id)
     creation_time = datetime.now(tzlocal())
     new_nwb = NWBFile(
         session_description=session_description,
+        subject_id=animal_id,
         identifier=f"{session_id}_merged_{creation_time.strftime('%Y%m%d_%H%M%S')}",
         session_start_time=session_start_time,
         session_id=source_session_id,
