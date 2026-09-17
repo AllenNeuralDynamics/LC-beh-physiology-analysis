@@ -647,6 +647,18 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
 
     logger.info(f"Merged table has {len(merged_df)} rows and {len(merged_df.columns)} columns")
 
+    # Remove duplicate spike times — equal consecutive values violate the NWB refractory-
+    if 'spike_times' in merged_df.columns:
+        def _clean_spike_times(st):
+            if isinstance(st, (list, np.ndarray)) and len(st) > 0:
+                return np.unique(np.asarray(st, dtype=np.float64))
+            return st
+        before = merged_df['spike_times'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else 0).sum()
+        merged_df['spike_times'] = merged_df['spike_times'].apply(_clean_spike_times)
+        after = merged_df['spike_times'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else 0).sum()
+        if before != after:
+            logger.warning(f"Removed {before - after} duplicate spike times across all units")
+
     if return_nwb:
         return merged_df, ephys_nwb, data_type
     else:
