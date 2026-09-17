@@ -14,6 +14,7 @@
         - Waveform and Spatial Organization
         - Behavior and Photometry
 - Data
+    - NWB Data on DANDI (001950)
     - Electrophysiology Recordings with and without behavior
     - Anatomical Registration and Spatial Mapping
     - Behavior Video Tracking
@@ -250,6 +251,26 @@ Reconstructs and visualizes fiber-photometry optic-fiber placement locations in 
 ---
 
 # Data Organization
+
+### NWB Data on DANDI (001950)
+
+All physiology and behavioral session data are packaged as [NWB](https://www.nwb.org/) files, one file per session, and publicly available on DANDI:
+
+- **Dandiset**: [DANDI:001950](https://dandiarchive.org/dandiset/001950)
+
+**Downloading the dandiset:**
+
+Install the DANDI client, then run:
+
+```bash
+python code/data_management/DANDI_example/download_dandiset_001950.py --data_dir /path/to/save
+```
+
+See [`download_dandiset_001950.py`](code/data_management/DANDI_example/download_dandiset_001950.py) for details.
+
+**Loading NWB data:**
+
+See [`DANDI_load_example.ipynb`](code/data_management/DANDI_example/DANDI_load_example.ipynb) for an example of how to stream or load NWB files from the dandiset and access spike times, behavioral events, pupil data, photometry signal and metadata.
 
 ### Electrophysiology Recordings with and without behavior
 - `all 'raw' data`: raw electrophysiology data with and without behavior，include high speed video for bottom and side of the face and whole body. 
