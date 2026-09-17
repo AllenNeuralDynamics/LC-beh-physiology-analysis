@@ -47,6 +47,7 @@ RUN pip install -U --no-cache-dir \
     natsort==8.4.0 \
     harp-python@git+https://github.com/jsiegle/harp-python@c73984a18905bb084dbb5b634776a3b5e47b511e \
     aind-dynamic-foraging-data-utils==0.1.4 \
+    dandi==0.74.0 \
     pdf2image==1.17.0 \
     seaborn==0.13.2 \
     trimesh==4.10.1 \
