@@ -784,9 +784,17 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     # 4. Create NWB file
     animal_id, session_time, _ = parseSessionID(session_id)
     creation_time = datetime.now(tzlocal())
+    # placeholder
+    subject=Subject(
+        subject_id=animal_id,
+        species="Mus musculus",
+        sex="M",           # "M", "F", or "U" (unknown)
+        age="P16W",        # ISO 8601 duration: P = period, 16W = 16 weeks
+        description="C57BL/6J mouse implanted with tetrode drive over LC",
+    ),
     new_nwb = NWBFile(
         session_description=session_description,
-        subject_id=animal_id,
+        subject=subject,
         identifier=f"{session_id}_merged_{creation_time.strftime('%Y%m%d_%H%M%S')}",
         session_start_time=session_start_time,
         session_id=source_session_id,
