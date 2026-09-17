@@ -12,6 +12,7 @@ import glob
 import json
 import logging
 import os
+import re
 import tempfile
 import pandas as pd
 import numpy as np
@@ -46,6 +47,27 @@ AIND_NAMESPACE = 'aind_beh_ephys'
 AIND_NAMESPACE_VERSION = '0.1.0'
 AIND_NEURODATA_TYPE = 'AindMetadata'
 AIND_LAB_META_DATA_KEY = 'aind_metadata'
+
+# Subject metadata. The NWB Subject is inherited from the source NWBs field by field
+# (see build_subject), falling back to the AIND subject.json in the session's raw asset —
+# the ephys NWBs of the older Neuralynx sessions carry a subject_id and nothing else.
+
+SUBJECT_JSON_NAME = 'subject.json'
+# NWB writes sex as a single-letter code, AIND metadata spells it out
+SEX_CODES = {'m': 'M', 'male': 'M', 'f': 'F', 'female': 'F', 'u': 'U', 'unknown': 'U',
+             'o': 'O', 'other': 'O'}
+SEX_UNKNOWN = 'U'
+# Descriptions saying nothing subject_id does not already say, e.g. 'Animal name:754897'
+UNINFORMATIVE_SUBJECT_DESCRIPTION = re.compile(r'^\s*animal\s*name\s*:', re.IGNORECASE)
+# ISO 8601 duration, the format NWB wants for Subject.age. The curated ephys NWBs carry
+# a stringified timedelta instead ('P237 days, 11:30:09D'), which this rejects.
+ISO8601_DURATION = re.compile(
+    r'^P(?!$)(\d+(?:\.\d+)?Y)?(\d+(?:\.\d+)?M)?(\d+(?:\.\d+)?W)?(\d+(?:\.\d+)?D)?'
+    r'(T(?=\d)(\d+(?:\.\d+)?H)?(\d+(?:\.\d+)?M)?(\d+(?:\.\d+)?S)?)?$'
+)
+# NWB weights are kilograms, but the behavior NWBs record grams ('24.1'). No mouse is
+# over a kilogram, so a weight above this is taken as grams and converted.
+MOUSE_WEIGHT_KG_MAX = 1.0
 
 # Load column mappings and descriptions
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
@@ -199,6 +221,197 @@ def add_aind_metadata(nwb_file, meta_dict):
         )
     )
     return nwb_file
+
+
+def _subject_value(value):
+    """Normalise a subject field to None when it carries nothing, so a later source fills it."""
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _named(value):
+    """Take the name out of an AIND metadata term ({'name': 'Mus musculus', ...} or a string)."""
+    if isinstance(value, dict):
+        return _subject_value(value.get('name'))
+    return _subject_value(value)
+
+
+def _subject_fields_from_nwb(nwb):
+    """Read the SUBJECT_FIELDS off a source NWB's Subject, {} when it has none."""
+    subject = getattr(nwb, 'subject', None) if nwb is not None else None
+    if subject is None:
+        return {}
+    return {field: _subject_value(getattr(subject, field, None)) for field in SUBJECT_FIELDS}
+
+
+def _subject_fields_from_json(session_id):
+    """
+    Read the subject fields out of the AIND subject.json in the session's raw asset.
+
+    Two aind-data-schema layouts are in circulation, and both turn up across these
+    sessions: v1 keeps the subject fields at the top level, v2 nests them under
+    'subject_details'. Only the fields NWB's Subject has a slot for are taken; the rest
+    (registries, breeding info, housing) stays in the AIND metadata blob, see
+    add_aind_metadata. Age and weight are not in this file at all - age is computed from
+    the date of birth by _subject_age, weight only ever comes from a source NWB.
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        dict of subject field -> value, empty when the file is missing or unreadable.
+    """
+    path = os.path.join(session_dirs(session_id)['raw_dir'], SUBJECT_JSON_NAME)
+    if not os.path.exists(path):
+        logger.info(f"No subject metadata at {path}")
+        return {}
+
+    try:
+        with open(path, 'r') as f:
+            record = json.load(f)
+        details = record.get('subject_details', record)
+        date_of_birth = _subject_value(details.get('date_of_birth'))
+        return {
+            'subject_id': _subject_value(record.get('subject_id')),
+            'date_of_birth': datetime.fromisoformat(date_of_birth) if date_of_birth else None,
+            'genotype': _subject_value(details.get('genotype')),
+            'sex': _subject_value(details.get('sex')),
+            'species': _named(details.get('species')),
+            'strain': _named(details.get('strain')) or _named(details.get('background_strain')),
+        }
+    except Exception as e:
+        logger.warning(f"Could not read subject metadata from {path}: {e}")
+        return {}
+
+
+def _subject_sex(sex):
+    """Map a spelled-out sex to its NWB code, 'U' when it is missing or unrecognised."""
+    if sex is None:
+        return SEX_UNKNOWN
+    code = SEX_CODES.get(str(sex).strip().lower())
+    if code is None:
+        logger.warning(f"Unrecognised subject sex '{sex}', writing '{SEX_UNKNOWN}'")
+        return SEX_UNKNOWN
+    return code
+
+
+def _subject_date_of_birth(date_of_birth, session_start_time):
+    """Give a date of birth the session's timezone, so hdmf does not write a naive datetime."""
+    if date_of_birth is None:
+        return None
+    if getattr(date_of_birth, 'tzinfo', None) is None:
+        tzinfo = getattr(session_start_time, 'tzinfo', None) or tzlocal()
+        return date_of_birth.replace(tzinfo=tzinfo)
+    return date_of_birth
+
+
+def _subject_age(age, date_of_birth, session_start_time):
+    """
+    Age at the session as an ISO 8601 duration in whole days, e.g. 'P237D'.
+
+    Computed from the date of birth whenever both dates are known, since the curated
+    ephys NWBs carry a stringified timedelta ('P237 days, 11:30:09D') that is not a
+    valid duration. Dates are compared as calendar dates, which is what the raw ephys
+    NWBs' own 'P237D' counts. An inherited age is kept only if the computation is
+    impossible and the string is a valid duration.
+    """
+    if date_of_birth is not None and session_start_time is not None:
+        days = (session_start_time.date() - date_of_birth.date()).days
+        if days >= 0:
+            computed = f'P{days}D'
+            if age is not None and age != computed:
+                logger.info(f"Replacing inherited subject age '{age}' with computed {computed}")
+            return computed
+        logger.warning(f"Date of birth {date_of_birth.date()} is after the session, dropping age")
+        return None
+    if age is not None and not ISO8601_DURATION.match(str(age)):
+        logger.warning(f"Subject age '{age}' is not an ISO 8601 duration and no date of birth "
+                       f"is available to recompute it, dropping age")
+        return None
+    return age
+
+
+def _subject_weight(weight):
+    """Weight as a kilogram string, converting the grams the behavior NWBs record."""
+    if weight is None:
+        return None
+    try:
+        kilograms = float(weight)
+    except (TypeError, ValueError):
+        return str(weight)
+    if kilograms > MOUSE_WEIGHT_KG_MAX:
+        logger.info(f"Subject weight {kilograms} is grams, not kilograms - writing "
+                    f"{kilograms / 1000:g} kg")
+        kilograms /= 1000
+    return f'{kilograms:g}'
+
+
+def _subject_description(description):
+    """Drop descriptions that only repeat the animal name (see UNINFORMATIVE_SUBJECT_DESCRIPTION)."""
+    if description is None or UNINFORMATIVE_SUBJECT_DESCRIPTION.match(str(description)):
+        return None
+    return description
+
+
+def build_subject(session_id, session_start_time, source_nwbs):
+    """
+    Build the merged NWB's Subject, inheriting each field from the first source that has it.
+
+    The source NWBs come first, in the order given, and the AIND subject.json in the
+    session's raw asset fills whatever they leave empty — for the Neuralynx sessions that
+    is everything but subject_id. A few fields are then normalised rather than copied
+    through, since the sources disagree with what NWB asks for: sex is coded to a single
+    letter, age is recomputed from the date of birth as an ISO 8601 duration, weight is
+    converted from grams to kilograms and a description that only repeats the animal name
+    is dropped (see the _subject_* helpers). Fields no source has are left unset, apart
+    from sex, which falls back to 'U' (unknown), and subject_id, which falls back to the
+    animal ID parsed out of session_id.
+
+    Args:
+        session_id: Session identifier
+        session_start_time: Session start time, used to compute age from the date of birth
+        source_nwbs: List of (label, nwb) pairs in priority order; the label is only used
+                     for logging and either NWB may be None
+
+    Returns:
+        pynwb.file.Subject
+    """
+    fields = {field: None for field in SUBJECT_FIELDS}
+    sources = [(label, _subject_fields_from_nwb(nwb)) for label, nwb in source_nwbs]
+    sources.append((SUBJECT_JSON_NAME, _subject_fields_from_json(session_id)))
+
+    inherited_from = {}
+    for label, candidate in sources:
+        for field, value in candidate.items():
+            if fields.get(field) is None and value is not None:
+                fields[field] = value
+                inherited_from[field] = label
+
+    animal_id, _, _ = parseSessionID(session_id)
+    if fields['subject_id'] is None:
+        logger.warning(f"No subject_id in any source, using the animal ID from {session_id}")
+        fields['subject_id'] = animal_id
+    elif animal_id is not None and str(fields['subject_id']) != str(animal_id):
+        logger.warning(f"Inherited subject_id '{fields['subject_id']}' does not match the animal "
+                       f"ID '{animal_id}' in {session_id}")
+
+    fields['species'] = _named(fields['species'])
+    fields['strain'] = _named(fields['strain'])
+    fields['sex'] = _subject_sex(fields['sex'])
+    fields['date_of_birth'] = _subject_date_of_birth(fields['date_of_birth'], session_start_time)
+    fields['age'] = _subject_age(fields['age'], fields['date_of_birth'], session_start_time)
+    fields['weight'] = _subject_weight(fields['weight'])
+    fields['description'] = _subject_description(fields['description'])
+
+    kwargs = {field: value for field, value in fields.items() if value is not None}
+    logger.info('Subject: ' + ', '.join(
+        f"{field}={value!r} (from {inherited_from.get(field, 'derived')})"
+        for field, value in kwargs.items()))
+    missing = [field for field in SUBJECT_FIELDS if field not in kwargs]
+    if missing:
+        logger.info(f"Subject fields no source provided: {', '.join(missing)}")
+    return Subject(**kwargs)
 
 
 def photometry_channel_labels(session_id):
@@ -675,6 +888,9 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     - Ephys units (merged custom + kilosort)
     - Acquisition TimeSeries (lick times, reward times, etc.)
 
+    Session and subject metadata are inherited from the source NWBs, the ephys one first
+    (see build_subject for how the Subject fields are filled).
+
     Args:
         session_id: Session identifier
         data_type: 'curated' or 'raw'. 'curated' falls back to 'raw' when no
@@ -793,16 +1009,13 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         source_session_id = session_id
         logger.info("Using default metadata (no source NWB available)")
 
-    # 4. Create NWB file
-    animal_id, session_time, _ = parseSessionID(session_id)
+    # 4. Create NWB file, with the subject inherited from the source NWBs (and the raw
+    # asset's subject.json for whatever they leave empty)
     creation_time = datetime.now(tzlocal())
-    # placeholder
-    subject=Subject(
-        subject_id=animal_id,
-        species="Mus musculus",
-        sex="M",           # "M", "F", or "U" (unknown)
-        age="P16W",        # ISO 8601 duration: P = period, 16W = 16 weeks
-        description="C57BL/6J mouse implanted with tetrode drive over LC",
+    subject = build_subject(
+        session_id,
+        session_start_time,
+        [('ephys NWB', ephys_nwb), ('behavior NWB', behavior_nwb)],
     )
     new_nwb = NWBFile(
         session_description=session_description,
@@ -1095,7 +1308,15 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
     sessions = [
+        'behavior_ZS062_2021-05-06_15-46-14',
+        'behavior_ZS059_2021-04-29_14-02-45',
+        'behavior_ZS061_2021-04-08_18-01-30',
+        'behavior_781166_2025-05-13_14-04-27',
+        'behavior_754897_2025-03-12_12-23-15',
         'behavior_754897_2025-03-13_11-20-42',
+        'behavior_754898_2025-01-01_20-40-03',
+        'behavior_749472_2025-01-09_13-56-02',
+        'behavior_754896_2025-01-03_17-20-19',
     ]
 
     for session in sessions:
@@ -1108,6 +1329,9 @@ if __name__ == '__main__':
         save_path, nwb, modalities = build_combined_nwb(session, data_type='curated', save_file=None)
         if nwb is not None:
             print(f"\n✓ Success! Combined NWB created")
+            print(f"  Subject: " + ', '.join(
+                f"{field}={getattr(nwb.subject, field)!r}" for field in SUBJECT_FIELDS
+                if getattr(nwb.subject, field, None) is not None))
             print(f"  Trials: {len(nwb.trials) if nwb.trials is not None else 0} rows")
             print(f"  Units: {len(nwb.units) if nwb.units is not None else 0} rows")
             print(f"  Modalities: {', '.join(k for k, v in modalities.items() if v)}")
