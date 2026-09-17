@@ -1,7 +1,7 @@
-# aind-beh-physiology-analysis
+# LC-beh-physiology-analysis
 
 ### Table of Contents
-- aind-beh-physiology-analysis
+- LC-beh-physiology-analysis
     - Table of Contents
     - Overview
 - Code
@@ -33,8 +33,8 @@
 This capsule contains analysis code for a study of physiology of LC NE neurons and behavior in a dynamic foraging task, focusing on the distribution of neuron properties across space. 
 
 - **Manuscript**: https://www.nature.com/articles/s41586-026-11026-0
-- **Github Repository**: https://github.com/AllenNeuralDynamics/aind-beh-ephys-analysis
-- **Code Ocean Capsule**: NEED TO ADD
+- **Github Repository**: https://github.com/AllenNeuralDynamics/LC-beh-ephys-analysis
+- **Code Ocean Capsule**: https://codeocean.allenneuraldynamics.org/capsule/1371202/tree/v5
 
 ---
 
