@@ -791,7 +791,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         sex="M",           # "M", "F", or "U" (unknown)
         age="P16W",        # ISO 8601 duration: P = period, 16W = 16 weeks
         description="C57BL/6J mouse implanted with tetrode drive over LC",
-    ),
+    )
     new_nwb = NWBFile(
         session_description=session_description,
         subject=subject,
