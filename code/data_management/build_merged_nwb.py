@@ -19,7 +19,7 @@ from datetime import datetime
 from uuid import uuid4
 from dateutil.tz import tzlocal
 from hdmf.spec import DatasetSpec, GroupSpec, NamespaceBuilder
-from pynwb import NWBFile, TimeSeries, get_class, load_namespaces
+from pynwb import NWBFile, NWBHDF5IO, TimeSeries, get_class, load_namespaces
 from hdmf_zarr import NWBZarrIO
 from pynwb.file import Subject
 
@@ -55,6 +55,26 @@ COLUMN_DESC_PATH = '/root/capsule/code/data_management/column_names_description.
 # label photometry acquisitions by brain region instead of channel index.
 FP_METADATA_DIR = '/root/capsule/code/data_management/FP_metadata'
 PHOTOMETRY_SIGNALS = ('G', 'Iso', 'G-Iso')
+# Signals left out of the merged NWB entirely; drop from here to start packing one again.
+PHOTOMETRY_SIGNALS_SKIPPED = ('G-Iso',)
+
+# Vocabulary for the photometry channel descriptions written by
+# rename_photometry_acquisition(), one entry per token of the acquisition name
+# '{signal}_{region}-{hemisphere}[_{detrending method}][_mc]'.
+PHOTOMETRY_SIGNAL_DESCRIPTIONS = {
+    'G': 'Green (470 nm excitation) fluorescence',
+    'Iso': 'Isosbestic (415 nm excitation) control fluorescence',
+    'G-Iso': "Green fluorescence referenced to the isosbestic control ('G-Iso' channel "
+             "from the upstream FIP preprocessing)",
+}
+PHOTOMETRY_DETRENDING_DESCRIPTIONS = {
+    'exp': "detrended with the 'exp' method (two exponential curves fitted to the baseline)",
+    'tri-exp': "detrended with the 'tri-exp' method (three exponential curves fitted to the baseline)",
+    'bright': "detrended with the 'bright' method (biphasic exponential bleaching baseline "
+              "scaled by a saturating exponential brightening term)",
+}
+PHOTOMETRY_MOTION_CORRECTION_DESCRIPTION = 'motion corrected using the isosbestic channel'
+HEMISPHERE_NAMES = {'L': 'left', 'R': 'right'}
 
 with open(COLUMN_MAP_PATH, 'r') as f:
     COLUMN_MAP = json.load(f)
@@ -85,6 +105,40 @@ REQUIRED_MODALITIES = (
     'keypoint_tracking',
 )
 NO_VALID_DATA = 'no valid data'
+
+# Backends build_combined_nwb can write, mapped to the extension each one needs:
+# hdf5 writes a single file, zarr writes a directory store.
+NWB_BACKENDS = {
+    'hdf5': ('.nwb', NWBHDF5IO),
+    'zarr': ('.nwb.zarr', NWBZarrIO),
+}
+
+
+def nwb_save_path(save_file, backend='zarr'):
+    """
+    Give a save path the extension its backend needs.
+
+    The two backends must not share a path: hdf5 writes a regular file and zarr a
+    directory store, so '<name>.nwb' is reserved for hdf5 and '<name>.nwb.zarr' for
+    zarr. Any existing .nwb / .nwb.zarr extension on the input is replaced, so a
+    caller can pass the same path for either backend.
+
+    Args:
+        save_file: path to save to, with or without an extension
+        backend: 'hdf5' or 'zarr'
+
+    Returns:
+        The path with the backend's extension, e.g.
+        nwb_save_path('nwb/s_combined.nwb', 'zarr') -> 'nwb/s_combined.nwb.zarr'
+    """
+    if backend not in NWB_BACKENDS:
+        raise ValueError(f"Unknown NWB backend '{backend}', expected one of {sorted(NWB_BACKENDS)}")
+    stem = str(save_file)
+    for extension in ('.zarr', '.nwb'):  # in this order, so '.nwb.zarr' comes off whole
+        if stem.endswith(extension):
+            stem = stem[:-len(extension)]
+    return stem + NWB_BACKENDS[backend][0]
+
 
 def load_intermediate_data(session_dir: Path) -> dict:
     """Load the four intermediate parquet tables for a session."""
@@ -203,11 +257,19 @@ def photometry_channel_labels(session_id):
 
 def rename_photometry_acquisition(acq_name, channel_labels):
     """
-    Replace the channel index in a photometry acquisition name with its region label.
+    Replace the channel index in a photometry acquisition name with its region label
+    and spell the renamed name out as a description.
 
-    Photometry names are '<signal>_<channel index>[_<processing method>]', where signal
-    is G, Iso or G-Iso, e.g. 'G_1_tri-exp_mc' -> 'G_TH-R_tri-exp_mc'. Names that are not
-    photometry channels, or whose index has no label, are returned unchanged.
+    Photometry names are '<signal>_<channel index>[_<detrending method>][_mc]', where
+    signal is G, Iso or G-Iso, e.g. 'G_1_tri-exp_mc' -> 'G_TH-R_tri-exp_mc'. The region
+    label carries the implant hemisphere, so renamed channels read
+    '{signal}_{region}-{hemisphere}[_{detrending method}][_mc]' and the description
+    reads back one clause per token, e.g. 'G_Gi-L_exp_mc' as green fluorescence from
+    the fiber in Gi in the left hemisphere, detrended with the 'exp' method and motion
+    corrected. The detrending method and the '_mc' motion correction flag are passed
+    through as they are, including when the name has neither. Names that are not
+    photometry channels, or whose index has no label, are returned unchanged and
+    undescribed.
 
     Args:
         acq_name: acquisition name from the behavior NWB
@@ -215,17 +277,37 @@ def rename_photometry_acquisition(acq_name, channel_labels):
                         photometry_channel_labels()
 
     Returns:
-        (new_name, region_label). region_label is None when nothing was renamed.
+        (new_name, region_label, description). region_label and description are None
+        when nothing was renamed.
     """
     parts = acq_name.split('_')
     if len(parts) < 2 or parts[0] not in PHOTOMETRY_SIGNALS:
-        return acq_name, None
+        return acq_name, None, None
 
-    label = channel_labels.get(parts[1])
+    signal, index = parts[0], parts[1]
+    label = channel_labels.get(index)
     if label is None:
-        return acq_name, None
+        return acq_name, None, None
 
-    return '_'.join([parts[0], label] + parts[2:]), label
+    # Everything after the channel index is a detrending method, optionally followed
+    # by the 'mc' motion correction flag; either or both may be absent.
+    processing = parts[2:]
+    motion_corrected = bool(processing) and processing[-1] == 'mc'
+    detrending = processing[:-1] if motion_corrected else processing
+
+    region, _, hemisphere = label.rpartition('-')
+    location = (f'{region} in the {HEMISPHERE_NAMES[hemisphere]} hemisphere'
+                if hemisphere in HEMISPHERE_NAMES else label)
+
+    clauses = [f'{PHOTOMETRY_SIGNAL_DESCRIPTIONS[signal]} from the fiber in {location}']
+    clauses += [PHOTOMETRY_DETRENDING_DESCRIPTIONS.get(method, f"processed with '{method}'")
+                for method in detrending]
+    if motion_corrected:
+        clauses.append(PHOTOMETRY_MOTION_CORRECTION_DESCRIPTION)
+    # Keep the original channel index, it is the only link back to the raw data
+    description = f"{', '.join(clauses)}. Photometry channel {index} in the raw data."
+
+    return '_'.join([signal, label] + processing), label, description
 
 
 def pupil_data_to_timeseries(pupil_data):
@@ -571,7 +653,8 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         return merged_df
 
 
-def build_combined_nwb(session_id, data_type='curated', save_file=None, add_metadata=False):
+def build_combined_nwb(session_id, data_type='curated', save_file=None, add_metadata=False,
+                       backend='zarr'):
     """
     Build a complete NWB file with available data modalities.
 
@@ -585,14 +668,17 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         data_type: 'curated' or 'raw'. 'curated' falls back to 'raw' when no
             curated unit table exists (the version used is reported as
             'ephys_version' in the returned modalities dict)
-        save_file: Path to save NWB file (if None, returns in-memory only)
+        save_file: Path to save NWB file (if None, returns in-memory only). The
+            extension is set from `backend`, so it can be passed without one
         add_metadata: If True, bundle the raw AIND metadata JSON files into a
             LabMetaData container (see add_aind_metadata). Placeholder metadata,
             expected to be replaced by properly typed metadata later.
+        backend: 'zarr' to write a '<save_file>.nwb.zarr' directory store, or 'hdf5'
+            to write a single '<save_file>.nwb' file (see nwb_save_path)
 
     Returns:
         Tuple of (save_path, nwb_object, data_modalities_dict)
-        save_path is the written store path, None if save_file was None, or the
+        save_path is the written file or store path, None if save_file was None, or the
         string NO_VALID_DATA ('no valid data') if none of REQUIRED_MODALITIES were
         found - in that case nothing is written and 'nwb_saved' stays None.
         data_modalities_dict has keys:
@@ -611,6 +697,11 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
             'nwb_saved': str or None - ISO timestamp when NWB was saved to file (None if not saved)
     """
     logger.info(f"Building combined NWB for {session_id}")
+
+    # Checked up front: the backend is only used at the very end, and a typo should not
+    # cost a whole build before it is reported
+    if backend not in NWB_BACKENDS:
+        raise ValueError(f"Unknown NWB backend '{backend}', expected one of {sorted(NWB_BACKENDS)}")
 
     # Track which data modalities are included
     data_modalities = {
@@ -754,12 +845,15 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         # Photometry channels are renamed from channel index to brain region
         channel_labels = photometry_channel_labels(session_id)
         for acq_name, acq_data in behavior_nwb.acquisition.items():
+            if acq_name.split('_')[0] in PHOTOMETRY_SIGNALS_SKIPPED:
+                logger.info(f"Skipping acquisition TimeSeries: {acq_name} (skipped photometry signal)")
+                continue
             if hasattr(acq_data, 'timestamps') and len(acq_data.timestamps) > 1:
-                new_name, region_label = rename_photometry_acquisition(acq_name, channel_labels)
+                new_name, region_label, photometry_description = rename_photometry_acquisition(
+                    acq_name, channel_labels)
                 description = acq_data.description if hasattr(acq_data, 'description') else ''
-                if region_label is not None:
-                    # Keep the original channel index, it is the only link back to the raw data
-                    description = f"{description} (fiber in {region_label}, channel {acq_name.split('_')[1]})".strip()
+                if photometry_description is not None:
+                    description = photometry_description
 
                 # Copy TimeSeries to new NWB
                 from pynwb import TimeSeries
@@ -947,22 +1041,27 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         )
         return NO_VALID_DATA, new_nwb, data_modalities
 
-    # 10. Save if requested (zarr backend; the store is a directory, so make sure
-    # the path carries the .zarr suffix rather than collide with an .nwb file)
+    # 10. Save if requested, with the extension the chosen backend needs ('.nwb' for
+    # hdf5, '.nwb.zarr' for the zarr directory store)
     if save_file is not None:
-        if not save_file.endswith('.zarr'):
-            save_file = save_file + '.zarr'
+        save_file = nwb_save_path(save_file, backend)
+        io_class = NWB_BACKENDS[backend][1]
         os.makedirs(os.path.dirname(save_file), exist_ok=True)
-        # mode='w' overwrites, but a zarr store has to be a directory: drop any
-        # regular file sitting at this path (e.g. left by the HDF5 backend).
-        if os.path.exists(save_file) and not os.path.isdir(save_file):
+        # mode='w' overwrites, but only in kind: a zarr store has to be a directory and
+        # an hdf5 file a regular file, so drop whatever is at the path if it is neither.
+        if backend == 'zarr' and os.path.exists(save_file) and not os.path.isdir(save_file):
             logger.warning(f"Removing non-directory file at {save_file} to make room for the zarr store")
             os.remove(save_file)
+        if backend == 'hdf5' and os.path.isdir(save_file):
+            raise IsADirectoryError(
+                f"{save_file} is a directory (a zarr store?), cannot write an hdf5 file there - "
+                f"remove it or build with backend='zarr'"
+            )
         save_time = datetime.now(tzlocal())
-        with NWBZarrIO(save_file, mode='w') as io:
+        with io_class(save_file, mode='w') as io:
             io.write(new_nwb)
         data_modalities['nwb_saved'] = save_time.isoformat()
-        logger.info(f"Saved combined NWB to {save_file}")
+        logger.info(f"Saved combined NWB ({backend}) to {save_file}")
     else:
         logger.info("Generated NWB in memory only (no file written)")
 

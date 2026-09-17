@@ -16,12 +16,13 @@ build_combined_nwb() once per session in a joblib worker and returns a flat
 result row, exactly as the notebook does.
 
 Build parameters come from a JSON file in code/data_management (created with
-defaults if absent), can be overridden per run with --n-jobs / --add-metadata,
-and a copy is written into the results folder so every run records what it was
-given.
+defaults if absent), can be overridden per run with --n-jobs / --add-metadata /
+--backend, and a copy is written into the results folder so every run records
+what it was given.
 
 Outputs, all under --results-dir (default /root/capsule/results):
-    nwb/<session>_combined.nwb.zarr   the zarr stores
+    nwb/<session>_combined.nwb.zarr   the zarr stores (--backend zarr, the default)
+    nwb/<session>_combined.nwb        single-file NWBs instead, with --backend hdf5
     logs/<session>.log               per-session build log
     build_all_nwb.log                the full run log (same text as stdout)
     nwb_build_params.json            copy of the parameters used
@@ -30,6 +31,7 @@ Outputs, all under --results-dir (default /root/capsule/results):
 Usage:
     python build_all_nwb.py --mode test
     python build_all_nwb.py --mode production --n-jobs 8 --add-metadata
+    python build_all_nwb.py --mode test --backend hdf5
 """
 import argparse
 import io
@@ -70,6 +72,7 @@ DEFAULT_PARAMS = {
     'build_one': {
         'data_type': 'curated',
         'add_metadata': True,
+        'backend': 'zarr',
     },
     'parallel': {
         'n_jobs': 4,
@@ -198,7 +201,8 @@ def build_one(session, save_dir, log_dir, **kwargs):
 
     started = datetime.now()
     try:
-        # build_combined_nwb writes zarr, so it returns the actual store path (save_file + '.zarr')
+        # build_combined_nwb sets the extension from its backend, so it returns the
+        # actual path written ('..._combined.nwb' or '..._combined.nwb.zarr')
         kwargs['save_file'] = os.path.join(save_dir, f"{session}_combined.nwb")
         logging.info(f"Building {session}: {kwargs}")
         nwb_path, _, modalities = build_combined_nwb(session, **kwargs)
@@ -247,6 +251,8 @@ def main(argv=None):
                         help='override parallel.n_jobs from the params file (memory-bound, not CPU-bound)')
     parser.add_argument('--add-metadata', action=argparse.BooleanOptionalAction, default=None,
                         help='override build_one.add_metadata from the params file: bundle the raw AIND metadata JSON into each NWB')
+    parser.add_argument('--backend', choices=['zarr', 'hdf5'], default=None,
+                        help="override build_one.backend from the params file: 'zarr' writes <session>_combined.nwb.zarr stores, 'hdf5' writes <session>_combined.nwb files")
     parser.add_argument('--fail-on-error', action='store_true',
                         help='exit nonzero if any session failed, instead of only reporting it')
     args = parser.parse_args(argv)
@@ -267,6 +273,8 @@ def main(argv=None):
         params['parallel']['n_jobs'] = args.n_jobs
     if args.add_metadata is not None:
         params['build_one']['add_metadata'] = args.add_metadata
+    if args.backend is not None:
+        params['build_one']['backend'] = args.backend
     params_copy = os.path.join(results_dir, 'nwb_build_params.json')
     with open(params_copy, 'w') as f:
         json.dump(params, f, indent=2)

@@ -1,7 +1,8 @@
 {
   "build_one": {
     "data_type": "curated",
-    "add_metadata": false
+    "add_metadata": false,
+    "backend": "hdf5"
   },
   "parallel": {
     "n_jobs": 8,
