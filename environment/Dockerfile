@@ -23,7 +23,7 @@ RUN apt-get update \
         awscli=1.22.34-1 \
         build-essential=12.9ubuntu3 \
         libgl1-mesa-glx=23.0.4-0ubuntu1~22.04.1 \
-        libssl-dev=3.0.2-0ubuntu1.25 \
+        libssl-dev=3.0.2-0ubuntu1.29 \
         pandoc=2.9.2.1-3ubuntu2 \
         pkg-config=0.29.2-1ubuntu3 \
         poppler-utils=22.02.0-2ubuntu0.13 \
