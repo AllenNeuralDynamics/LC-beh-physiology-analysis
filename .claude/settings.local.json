@@ -45,7 +45,10 @@
       "Bash(python -)",
       "Bash(sed -n 1560,1600p /code/beh_ephys_analysis/utils/beh_functions.py)",
       "Read(//code/beh_ephys_analysis/utils/**)",
-      "Bash(sed -n 745,800p /opt/conda/lib/python3.12/site-packages/hdmf_zarr/backend.py)"
+      "Bash(sed -n 745,800p /opt/conda/lib/python3.12/site-packages/hdmf_zarr/backend.py)",
+      "Bash(HDF5_USE_FILE_LOCKING=FALSE python -c ' *)",
+      "Bash(HDF5_USE_FILE_LOCKING=FALSE python -)",
+      "Bash(HDF5_USE_FILE_LOCKING=FALSE timeout 600 python -)"
     ]
   }
 }

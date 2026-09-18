@@ -62,7 +62,9 @@
       "Read(//opt/conda/lib/python3.12/site-packages/spikeinterface/**)",
       "Read(//opt/conda/lib/python3.12/site-packages/spikeinterface/qualitymetrics/**)",
       "Bash(cd /opt/conda/lib/python3.12/site-packages/spikeinterface *)",
-      "Bash(ls -d /root/capsule/scratch/combined/nwb_testing_folder/*.zarr 2>/dev/null | head)"
+      "Bash(ls -d /root/capsule/scratch/combined/nwb_testing_folder/*.zarr 2>/dev/null | head)",
+      "Bash(HDF5_USE_FILE_LOCKING=FALSE timeout 900 python -)",
+      "Bash(HDF5_USE_FILE_LOCKING=FALSE timeout 600 python -)"
     ],
     "additionalDirectories": [
       "/tmp"
