@@ -1021,7 +1021,7 @@ def update_unit_tbl_by_drift(session, data_type):
     """
     session_dir = session_dirs(session)
     opto_drift_tbl = pd.read_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_drift_tbl.csv'))
-    unit_tbl = pd.read_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_metrics.pkl'))
+    unit_tbl = pd.read_pickle(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_metrics.pkl'))
     for i, row in opto_drift_tbl.iterrows():
         if row['r_squared_diff_abs_slow_rf'] > 0.1:
             unit_tbl.loc[unit_tbl['unit_id'] == row['unit_id'], 'ephys_cut'] = [row['r_squared_diff_abs_slow_rf'], row['r_squared_diff_abs_fast_rf']]
