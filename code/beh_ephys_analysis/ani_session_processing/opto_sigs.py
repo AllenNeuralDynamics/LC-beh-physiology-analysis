@@ -79,7 +79,7 @@ def cal_opto_sigs(session, data_type):
                 for freq_ind, freq in enumerate(freqs):
                     for pre_post_ind, pre_post in enumerate(pre_posts):
                         # get the trials for this condition
-                        trials = opto_tbl[(opto_tbl['power'] == power) & (opto_tbl['site'] == site) & (opto_tbl['pre_post'] == pre_post) & (opto_tbl['freq'] == freq)]
+                        trials = opto_tbl_curr[(opto_tbl_curr['power'] == power) & (opto_tbl_curr['site'] == site) & (opto_tbl_curr['pre_post'] == pre_post) & (opto_tbl_curr['freq'] == freq)]
                         if len(trials) == 0:
                             # print(f"No trials for power {power}, site {site}, freq {freq}, pre_post {pre_post}")
                             continue

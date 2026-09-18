@@ -28,6 +28,7 @@ from sklearn.cluster import KMeans
 import re
 from utils.beh_functions import session_dirs, get_history_from_nwb, get_unit_tbl
 from utils.plot_utils import shiftedColorMap, template_reorder, plot_raster_bar,merge_pdfs, combine_pdf_big
+from utils.ephys_functions import convert_values
 from session_preprocessing import ephys_opto_preprocessing
 from opto_tagging import opto_plotting_session
 from open_ephys.analysis import Session
@@ -1021,10 +1022,19 @@ def update_unit_tbl_by_drift(session, data_type):
     """
     session_dir = session_dirs(session)
     opto_drift_tbl = pd.read_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_drift_tbl.csv'))
-    unit_tbl = pd.read_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_metrics.pkl'))
+    unit_tbl = pd.read_pickle(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_metrics.pkl'))
+    if 'ephys_cut' not in unit_tbl.columns:
+        unit_tbl['ephys_cut'] = [[None, None] for _ in range(len(unit_tbl))]
+    unit_tbl['ephys_cut'] = unit_tbl['ephys_cut'].astype(object)
+    if 'drift_unit' not in unit_tbl.columns:
+        unit_tbl['drift_unit'] = False
     for i, row in opto_drift_tbl.iterrows():
         if row['r_squared_diff_abs_slow_rf'] > 0.1:
-            unit_tbl.loc[unit_tbl['unit_id'] == row['unit_id'], 'ephys_cut'] = [row['r_squared_diff_abs_slow_rf'], row['r_squared_diff_abs_fast_rf']]
+            # ephys_cut round-trips through the csv as a string, e.g. "[nan, 16767500]"
+            ephys_cut = convert_values(row['ephys_cut'])
+            # assign cell-wise so the pair lands in one cell instead of being broadcast
+            for ind in unit_tbl.index[unit_tbl['unit_id'] == row['unit_id']]:
+                unit_tbl.at[ind, 'ephys_cut'] = ephys_cut
             unit_tbl.loc[unit_tbl['unit_id'] == row['unit_id'], 'drift_unit'] = True
     unit_tbl.to_pickle(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_metrics.pkl'))
     return unit_tbl
