@@ -722,11 +722,11 @@ def antidromic_tier_categorization(antidromic_pivot):
     categories = []
     for idx, row in antidromic_pivot.iterrows():
         unit_id = row['unit_id']
-        tier = 0
-        site_for_tier = None
         for col in antidromic_pivot.columns:
             if col.startswith('opto_p_val_') and not col.endswith('surface_LC'):
                 site = col.replace('opto_p_val_', '')
+                # tier is per unit-site, so it must not carry over from a previous site
+                tier = 0
                 opto_p_val = row.get(col, None)
                 opto_p_val_col = f'opto_p_val_{site}'
                 antidromic_latency_col = f'antidromic_latency_{site}'
@@ -735,19 +735,21 @@ def antidromic_tier_categorization(antidromic_pivot):
                 jitter = row.get(jitter_col, None)
                 collision_pvalue = None
                 collision_pbinom = None
+                # a significant opto response is a prerequisite for every tier, so the
+                # jitter and collision criteria only refine an already-significant site
                 if pd.notnull(opto_p_val) and opto_p_val < 0.05:
-                    tier = 3                    
-                if pd.notnull(jitter) and jitter < 0.007:
-                    tier = 2
-                    collision_pvalue_col = f'collision_pvalue_{site}'
-                    collision_pbinom_col = f'collision_pbinom_{site}'
-                    collision_pvalue = row.get(collision_pvalue_col, None)
-                    collision_pbinom = row.get(collision_pbinom_col, None)
-                    print(f"Unit {unit_id} is categorized as tier {tier} for site {site} with antidromic latency: {antidromic_latency} and jitter: {jitter} and collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
-                    if pd.notnull(collision_pvalue) and collision_pvalue < 0.05 and pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
-                    # if pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
-                        tier = 1                    
+                    tier = 3
+                    if pd.notnull(jitter) and jitter < 0.007:
+                        tier = 2
+                        collision_pvalue_col = f'collision_pvalue_{site}'
+                        collision_pbinom_col = f'collision_pbinom_{site}'
+                        collision_pvalue = row.get(collision_pvalue_col, None)
+                        collision_pbinom = row.get(collision_pbinom_col, None)
                         print(f"Unit {unit_id} is categorized as tier {tier} for site {site} with antidromic latency: {antidromic_latency} and jitter: {jitter} and collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
+                        if pd.notnull(collision_pvalue) and collision_pvalue < 0.05 and pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
+                        # if pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
+                            tier = 1
+                            print(f"Unit {unit_id} is categorized as tier {tier} for site {site} with antidromic latency: {antidromic_latency} and jitter: {jitter} and collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
                 site_for_tier = site
                 categories.append({'unit_id': unit_id, 'tier': tier, 'site_for_tier': f'{site_for_tier}_antidromic_tier'})
 
