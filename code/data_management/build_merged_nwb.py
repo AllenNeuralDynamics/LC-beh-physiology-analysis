@@ -53,6 +53,10 @@ AIND_LAB_META_DATA_KEY = 'aind_metadata'
 # the ephys NWBs of the older Neuralynx sessions carry a subject_id and nothing else.
 
 SUBJECT_JSON_NAME = 'subject.json'
+# The pynwb Subject fields this inherits, in the order they are logged. Everything Subject
+# takes except age__reference, which no source carries and pynwb defaults to 'birth'.
+SUBJECT_FIELDS = ('subject_id', 'species', 'strain', 'sex', 'date_of_birth', 'age', 'weight',
+                  'genotype', 'description')
 # NWB writes sex as a single-letter code, AIND metadata spells it out
 SEX_CODES = {'m': 'M', 'male': 'M', 'f': 'F', 'female': 'F', 'u': 'U', 'unknown': 'U',
              'o': 'O', 'other': 'O'}
