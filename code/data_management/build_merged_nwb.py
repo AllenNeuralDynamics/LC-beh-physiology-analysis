@@ -40,6 +40,14 @@ TONGUE_MOVEMENT_DATA_DIR = Path('/root/capsule/data/all_tongue_movements')
 TONGUE_MOVEMENT_PARQUET = TONGUE_MOVEMENT_DATA_DIR / 'all_tongue_movements_04022026.parquet'
 KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings')
 
+# Spike times must reach the NWB in seconds. A sorter that leaves them as sample
+# indices is caught by the span, not the magnitude: seconds here carry a large
+# absolute-clock offset (the earliest spike is often 1e6-1.7e7), so only the
+# max-to-min distance separates the two. Real sessions span 1.6e3-7.0e3 s; an hour of
+# sample indices at 30 kHz spans ~1.1e8. See spike_times_are_samples.
+MAX_PLAUSIBLE_SESSION_SECONDS = 86400  # 24 h, far above any observed session
+NOMINAL_SAMPLING_RATE = 30000  # only to report what the span would be as seconds
+
 # AIND metadata extension: the raw metadata JSON files are bundled as a single JSON
 # blob in a LabMetaData container. Placeholder for now — expected to be replaced by
 # properly typed metadata later.
@@ -54,8 +62,10 @@ AIND_LAB_META_DATA_KEY = 'aind_metadata'
 
 SUBJECT_JSON_NAME = 'subject.json'
 # The pynwb Subject fields this inherits, in the order they are logged. Everything Subject
-# takes except age__reference, which no source carries and pynwb defaults to 'birth'.
-SUBJECT_FIELDS = ('subject_id', 'species', 'strain', 'sex', 'date_of_birth', 'age', 'weight',
+# takes except age__reference, which no source carries and pynwb defaults to 'birth', and
+# weight: the sources record a bare number whose unit is ambiguous (nwbinspector rejects
+# '0.0257'), and some carry a NaN, so it is left out rather than written wrong.
+SUBJECT_FIELDS = ('subject_id', 'species', 'strain', 'sex', 'date_of_birth', 'age',
                   'genotype', 'description')
 # NWB writes sex as a single-letter code, AIND metadata spells it out
 SEX_CODES = {'m': 'M', 'male': 'M', 'f': 'F', 'female': 'F', 'u': 'U', 'unknown': 'U',
@@ -69,10 +79,6 @@ ISO8601_DURATION = re.compile(
     r'^P(?!$)(\d+(?:\.\d+)?Y)?(\d+(?:\.\d+)?M)?(\d+(?:\.\d+)?W)?(\d+(?:\.\d+)?D)?'
     r'(T(?=\d)(\d+(?:\.\d+)?H)?(\d+(?:\.\d+)?M)?(\d+(?:\.\d+)?S)?)?$'
 )
-# NWB weights are kilograms, but the behavior NWBs record grams ('24.1'). No mouse is
-# over a kilogram, so a weight above this is taken as grams and converted.
-MOUSE_WEIGHT_KG_MAX = 1.0
-
 # Load column mappings and descriptions
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
 COLUMN_DESC_PATH = '/root/capsule/code/data_management/column_names_description.json'
@@ -257,8 +263,8 @@ def _subject_fields_from_json(session_id):
     sessions: v1 keeps the subject fields at the top level, v2 nests them under
     'subject_details'. Only the fields NWB's Subject has a slot for are taken; the rest
     (registries, breeding info, housing) stays in the AIND metadata blob, see
-    add_aind_metadata. Age and weight are not in this file at all - age is computed from
-    the date of birth by _subject_age, weight only ever comes from a source NWB.
+    add_aind_metadata. Age is not in this file at all - it is computed from the date of
+    birth by _subject_age. Weight is deliberately not inherited at all, see SUBJECT_FIELDS.
 
     Args:
         session_id: Session identifier
@@ -336,21 +342,6 @@ def _subject_age(age, date_of_birth, session_start_time):
     return age
 
 
-def _subject_weight(weight):
-    """Weight as a kilogram string, converting the grams the behavior NWBs record."""
-    if weight is None:
-        return None
-    try:
-        kilograms = float(weight)
-    except (TypeError, ValueError):
-        return str(weight)
-    if kilograms > MOUSE_WEIGHT_KG_MAX:
-        logger.info(f"Subject weight {kilograms} is grams, not kilograms - writing "
-                    f"{kilograms / 1000:g} kg")
-        kilograms /= 1000
-    return f'{kilograms:g}'
-
-
 def _subject_description(description):
     """Drop descriptions that only repeat the animal name (see UNINFORMATIVE_SUBJECT_DESCRIPTION)."""
     if description is None or UNINFORMATIVE_SUBJECT_DESCRIPTION.match(str(description)):
@@ -366,9 +357,9 @@ def build_subject(session_id, session_start_time, source_nwbs):
     session's raw asset fills whatever they leave empty — for the Neuralynx sessions that
     is everything but subject_id. A few fields are then normalised rather than copied
     through, since the sources disagree with what NWB asks for: sex is coded to a single
-    letter, age is recomputed from the date of birth as an ISO 8601 duration, weight is
-    converted from grams to kilograms and a description that only repeats the animal name
-    is dropped (see the _subject_* helpers). Fields no source has are left unset, apart
+    letter, age is recomputed from the date of birth as an ISO 8601 duration, and a
+    description that only repeats the animal name is dropped (see the _subject_* helpers).
+    Weight is not inherited at all, see SUBJECT_FIELDS. Fields no source has are left unset, apart
     from sex, which falls back to 'U' (unknown), and subject_id, which falls back to the
     animal ID parsed out of session_id.
 
@@ -405,7 +396,6 @@ def build_subject(session_id, session_start_time, source_nwbs):
     fields['sex'] = _subject_sex(fields['sex'])
     fields['date_of_birth'] = _subject_date_of_birth(fields['date_of_birth'], session_start_time)
     fields['age'] = _subject_age(fields['age'], fields['date_of_birth'], session_start_time)
-    fields['weight'] = _subject_weight(fields['weight'])
     fields['description'] = _subject_description(fields['description'])
 
     kwargs = {field: value for field, value in fields.items() if value is not None}
@@ -749,6 +739,38 @@ def load_keypoint_tracking(session_id):
     return movs_table, kins_table
 
 
+def spike_times_are_samples(spike_times_col):
+    """
+    Detect spike times left as sample indices instead of seconds.
+
+    Compares the span (latest minus earliest spike across every unit) against the
+    longest session that could plausibly exist. The absolute values are not usable
+    here: correct seconds are offset onto an absolute clock, so the earliest spike
+    can itself be in the millions. The span is offset-free.
+
+    Args:
+        spike_times_col: iterable of per-unit spike time arrays
+
+    Returns:
+        (is_samples, span) where span is None if no unit holds any spike
+    """
+    lo = hi = None
+    for spike_times in spike_times_col:
+        if not isinstance(spike_times, (list, np.ndarray)):
+            continue
+        arr = np.asarray(spike_times, dtype=np.float64)
+        if arr.size == 0:
+            continue
+        lo = arr.min() if lo is None else min(lo, arr.min())
+        hi = arr.max() if hi is None else max(hi, arr.max())
+
+    if lo is None:
+        return False, None
+
+    span = float(hi - lo)
+    return span > MAX_PLAUSIBLE_SESSION_SECONDS, span
+
+
 def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     """
     Merge unit tables from custom pickle and NWB kilosort data.
@@ -765,6 +787,9 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         If return_nwb=True: Tuple of (merged_df, ephys_nwb, data_type_used), where
             data_type_used is the version actually loaded ('curated' or 'raw'),
             or (None, None, None) if merge fails
+
+        Counts as a failure, so the caller builds an NWB without units: spike times
+        that are sample indices rather than seconds (see spike_times_are_samples).
     """
     # 1. Load custom unit table (use summary version)
     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
@@ -863,6 +888,21 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         merged_df[mapped_name] = nwb_aligned[orig_col].values
 
     logger.info(f"Merged table has {len(merged_df)} rows and {len(merged_df.columns)} columns")
+
+    # Drop the whole table when the sorter left spike times as sample indices: rescaling
+    # them here would guess at a sampling rate, and passing them through would silently
+    # misalign every unit against the behavior clock. Checked before the dedup below so a
+    # doomed table does not pay for a np.unique over millions of spikes.
+    if 'spike_times' in merged_df.columns:
+        is_samples, span = spike_times_are_samples(merged_df['spike_times'])
+        if is_samples:
+            logger.error(
+                f"Dropping unit table for {session_id} ({data_type}): spike_times span "
+                f"{span:,.1f} exceeds {MAX_PLAUSIBLE_SESSION_SECONDS}s, so they are sample "
+                f"indices rather than seconds (as {NOMINAL_SAMPLING_RATE} Hz samples the span "
+                f"would be {span / NOMINAL_SAMPLING_RATE:,.1f}s). Building without units."
+            )
+            return (None, None, None) if return_nwb else None
 
     # Remove duplicate spike times — equal consecutive values violate the NWB refractory-
     if 'spike_times' in merged_df.columns:
