@@ -62,6 +62,10 @@ import time
 import shutil 
 from aind_ephys_utils import align
 
+# waveform_mean/waveform_sd come from the spikeinterface `templates` extension, which
+# averages the `random_spikes` subset of each unit's spikes (max_spikes_per_unit=500).
+MAX_SPIKES_PER_WAVEFORM = 500
+
 def plot_unit_beh_session(session, data_type = 'curated', align_name = 'go_cue', curate_time=True, opto_only=False,
                         model_name = 'stan_qLearning_5params',
                         formula = 'spikes ~ 1 + outcome + choice + Qchosen',
@@ -195,10 +199,13 @@ def plot_unit_beh_session(session, data_type = 'curated', align_name = 'go_cue',
             waveform = unit_tbl.query('unit_id == @unit_id')['waveform_mean'].values[0]
             peakChannel = np.argmin(np.min(waveform, axis=0))
             peakWaveform = waveform[:,peakChannel]
-            peakSD = unit_tbl.query('unit_id == @unit_id')['waveform_mean'].values[0][:,peakChannel]
+            peakSD = unit_tbl.query('unit_id == @unit_id')['waveform_sd'].values[0][:,peakChannel]
+            # number of waveforms actually averaged for this unit
+            nWaveforms = min(len(spike_times), MAX_SPIKES_PER_WAVEFORM)
+            peakSEM = peakSD/np.sqrt(nWaveforms)
             timeWF = np.array(range(len(peakWaveform)))-90
             ax.plot(timeWF, peakWaveform, color = 'k')
-            ax.fill_between(timeWF, peakWaveform - peakSD/np.sqrt(499), peakWaveform + peakSD/np.sqrt(499), color = 'k', alpha = 0.1)
+            ax.fill_between(timeWF, peakWaveform - peakSEM, peakWaveform + peakSEM, color = 'k', alpha = 0.1)
             ax.axhline(y=0, color = 'r', ls = '--')
             ax.set_xlabel('Time (ms)', fontsize = fs)
             ax.set_ylabel(r'$\mu$-Plot')
