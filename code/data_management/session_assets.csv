@@ -1,10 +1,4 @@
 session_id,probe,behavior,side,behavior_pass,pass_ephys_qc,Notes,raw_data,sorted_old,sorted type,sorted,,sorted_opto_curation,sorted_curated,sorted_opto_bandpass,sorted_opto_highpass_curation,model_stan
-behavior_792292_2025-08-13_14-47-17,2,1,-1,1,1,,12e01608-5660-47fc-a9b7-064440a8b39a,No auto sorting,"ecephys_ks4_opto, bandpass",91bb2ab7-4ebc-471c-bdb0-cb2afc970eb5,,,,,,
-behavior_792292_2025-08-15_14-15-47,2,1,-1,1,1,,100ff66a-d3ba-4cd6-8619-fc5b11dba085,No auto sorting,"ecephys_ks4_opto, bandpass",1d3747a4-f251-4f2d-a5bc-c9e8018845f9,,,,,,
-behavior_796387_2025-09-09_13-37-29,2,1,-1,1,1,,a64ba061-29d4-487b-9d9a-5a7857b122c2,ebb7b6eb-736d-4d4a-9937-82e92db635b4,"ecephys_ks25_opto, bandpass",184a7412-ee57-4764-afd5-1945bd70c204,,,,,,
-behavior_792288_2025-08-26_11-41-18,2,1,1,1,1,,217f4985-113f-41b1-b618-182a57579e83,03121fd6-c344-4f37-a67e-2cfb038d9811,"ecephys_ks25_opto, bandpass",90d9e0e3-9ffd-45a4-b635-dcac24112be3,,,,,,
-behavior_792288_2025-08-27_12-09-38,2,1,1,1,1,,33f616ea-dcab-43af-bbb8-634aa05df699,No auto sorting,"ecephys_ks4_opto, bandpass",305d990d-aca3-4d27-b78e-61e2f880243b,,,,,,
-behavior_791174_2025-09-05_14-06-53,2,1,-1,1,1,,b243b7e6-179f-404c-853f-001d81cf7960,No auto sorting,"ecephys_ks4_opto, bandpass",94a95033-d0b4-4b91-b529-fd40ec10cd2b,,,,,,
 behavior_808655_2025-09-16_10-53-22,2,1,1,1,1,,e0a8ab94-627d-4711-ac82-8039ad5f8747,da6cf127-4155-45f2-8b50-79a1a104efb5,"Kilosort4, bandpass",865746c6-86bd-49e1-bd12-16d9eb534f82,,,,,,
 behavior_808655_2025-09-18_13-56-51,2,1,-1,1,1,,aefe19ce-21fb-4301-a8da-0b166245d3c3,a7db0b68-fa2a-40ff-957b-ec7e9a35a0f9,"Kilosort4, bandpass",eb8f91d0-744c-4a3e-bad1-0deaf2352f8f,,,,,,
 behavior_808655_2025-09-19_15-00-30,2,1,-1,1,1,,ac1c8468-ea09-40aa-8788-b88759784542,No auto sorting,"ecephys_ks25_opto, bandpass",67e2bc27-b782-403c-96b3-8f075a79fd11,,,,,,

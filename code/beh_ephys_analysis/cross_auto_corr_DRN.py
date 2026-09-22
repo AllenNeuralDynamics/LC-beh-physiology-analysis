@@ -31,8 +31,19 @@ def cross_auto_corr_DRN(session, data_type):
 
     # find opto-free periods for np data
 
-    opto_file = os.path.join(session_dir['opto_dir_curated'], 
-                                f'{session}_opto_session.csv')
+    # opto tables are written under ephys/opto/<data_type>, so look there first rather
+    # than assuming curated; raw-sorted sessions have no curated directory at all. Raise
+    # instead of falling back to the full ephys_cut, which would pull the opto-tagging
+    # blocks into the opto-free window and let stimulus-locked spikes dominate.
+    opto_file = None
+    for key in (f'opto_dir_{data_type}', 'opto_dir_curated', 'opto_dir_raw'):
+        candidate = os.path.join(str(session_dir[key]), f'{session}_opto_session.csv')
+        if os.path.exists(candidate):
+            opto_file = candidate
+            break
+    if opto_file is None:
+        raise FileNotFoundError(
+            f'No {session}_opto_session.csv under ephys/opto for {session}')
     opto_tbl = pd.read_csv(opto_file)
     if len(opto_tbl['pre_post'].unique()) > 1:
         rec_start = opto_tbl[opto_tbl['pre_post'] == 'pre']['time'].max()

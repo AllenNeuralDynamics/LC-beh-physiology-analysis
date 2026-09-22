@@ -49,7 +49,10 @@ def capsule_directories():
         'output_dir': output_dir,
         'manuscript_fig_dir': output_dir / 'manuscript' / 'figures',
         'manuscript_fig_prep_dir': output_dir / 'manuscript' / 'prep',
-        'derived_dir': root / 'data' / 'scratch_data',
+        # The derived-data tree lives in scratch, which is where every session's qm.json,
+        # drift, opto and processed output already sits. It must stay writable, so it
+        # cannot be a mounted data asset under data/ -- those mount read-only.
+        'derived_dir': root / 'scratch',
         'data_dir': root / 'data',
     }
     for dir in dirs.values():

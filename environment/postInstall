@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
-pip uninstall -y traitlets
-# pip install --no-cache-dir --ignore-installed traitlets==5.9.0
+# Fix traitlets dependency issue
+pip uninstall -y traitlets || true
+pip install --no-cache-dir --ignore-installed traitlets==5.13.0
 # pip install -e git+https://github.com/AllenNeuralDynamics/aind_multisession_ephys.git#egg=aind-multisession-ephys
 pip install --no-deps --no-cache-dir git+https://github.com/AllenNeuralDynamics/aind-ephys-rig-qc@sue_alignment_on_CO
 pip install --no-deps --no-cache-dir git+https://github.com/AllenNeuralDynamics/aind-dynamic-foraging-basic-analysis@plot_session_in_time_sue
+
+# Hartigan dip test of unimodality, used by functional_cluster_analysis.py
+pip install --no-cache-dir diptest==0.11.0
 
 # # move VS code data directory into capsule, so it persists
 # ln -s /root/capsule/code/.vscode/ /.vscode

@@ -169,6 +169,18 @@ def process_session(session, beh, rec_side, probe, sex, target='soma'):
 
     # --- waveform-independent scalar values ---
     isi_v = unit_tbl['isi_violations_ratio'].tolist()
+    # laser-free ISI violations, from the sidecar add_isi_nonopto.py writes; NaN for
+    # sessions that have not been backfilled yet
+    if 'isi_violations_ratio_nonopto' in unit_tbl.columns:
+        isi_v_nonopto = unit_tbl['isi_violations_ratio_nonopto'].tolist()
+        isi_v_opto = unit_tbl['isi_violations_ratio_opto'].tolist()
+        frac_nonopto = unit_tbl['frac_nonopto'].tolist()
+        qc_pass_nonopto = unit_tbl['default_qc_nonopto'].tolist()
+    else:
+        isi_v_nonopto = [np.nan]*len(unit_tbl)
+        isi_v_opto = [np.nan]*len(unit_tbl)
+        frac_nonopto = [np.nan]*len(unit_tbl)
+        qc_pass_nonopto = [np.nan]*len(unit_tbl)
     presenece_ratio = unit_tbl['presence_ratio'].tolist()
     amplitude_cutoff = unit_tbl['amplitude_cutoff'].tolist()
     snr = unit_tbl['snr'].tolist()
@@ -284,6 +296,10 @@ def process_session(session, beh, rec_side, probe, sex, target='soma'):
         'sig_counts': all_sig_counts,
         'lat_max_p': lat_max_p,
         'isi_violations': isi_v,
+        'isi_violations_nonopto': isi_v_nonopto,
+        'isi_violations_opto': isi_v_opto,
+        'frac_nonopto': frac_nonopto,
+        'qc_pass_nonopto': qc_pass_nonopto,
         'snr': snr,
         'amplitude_cutoff': amplitude_cutoff,
         'presence_ratio': presenece_ratio,        

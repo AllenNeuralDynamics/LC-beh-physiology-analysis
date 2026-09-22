@@ -2,44 +2,42 @@
 # %%
 import sys
 import os
+import traceback
 sys.path.append('/root/capsule/code/beh_ephys_analysis')
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-from matplotlib.colors import LinearSegmentedColormap
-import pandas as pd
-from pynwb import NWBFile, TimeSeries, NWBHDF5IO
-import json
-import seaborn as sns
-from PyPDF2 import PdfMerger
-from sklearn.linear_model import LinearRegression
-import statsmodels.api as sm
-import re
+# import matplotlib.pyplot as plt
+# import matplotlib.gridspec as gridspec
+# from matplotlib.colors import LinearSegmentedColormap
+# import pandas as pd
+# from pynwb import NWBFile, TimeSeries, NWBHDF5IO
+# import json
+# import seaborn as sns
+# from PyPDF2 import PdfMerger
+# from sklearn.linear_model import LinearRegression
+# import statsmodels.api as sm
+# import re
 from utils.beh_functions import session_dirs, parseSessionID, load_model_dv, makeSessionDF, get_session_tbl, get_unit_tbl, get_history_from_nwb, plot_session_glm
 from utils.ephys_functions import*
 from utils.ccf_utils import ccf_pts_convert_to_mm
 from utils.capsule_migration import capsule_directories
 import pickle
-import scipy.stats as stats
-import spikeinterface as si
-import shutil
-from sklearn.metrics import roc_auc_score, roc_curve
-from sklearn.metrics import r2_score
-from matplotlib import cm
-import matplotlib.colors as mcolors
+# import scipy.stats as stats
+# import spikeinterface as si
+# import shutil
+# from sklearn.metrics import roc_auc_score, roc_curve
+# from sklearn.metrics import r2_score
+# from matplotlib import cm
+# import matplotlib.colors as mcolors
 from joblib import Parallel, delayed
-from utils.combine_tools import apply_qc
-from scipy.stats import gaussian_kde
+# from utils.combine_tools import apply_qc
+# from scipy.stats import gaussian_kde
 from beh_mertics import cal_beh_metrics
 capsule_dirs = capsule_directories()
 
 
-recompute_metrics = False
+recompute_metrics = True
 # %%
-dfs = [pd.read_csv('/root/capsule/code/data_management/session_assets.csv'),
-        pd.read_csv('/root/capsule/code/data_management/hopkins_session_assets.csv'),
-        pd.read_csv('/root/capsule/code/data_management/hopkins_FP_session_assets.csv')]
-df = pd.concat(dfs)
+df = pd.read_csv('/root/capsule/code/data_management/session_assets.csv', dtype={'probe': str})
 session_ids = df['session_id'].values
 session_ids = [session_id for session_id in session_ids if isinstance(session_id, str)]  # filter only behavior sessions
 
@@ -48,17 +46,22 @@ def process_session(session):
     """
     """
     print(session)
+    session_data = None
     session_dir = session_dirs(session)
     if os.path.exists(os.path.join(session_dir['beh_fig_dir'], f'{session}.nwb')):
         try:
-            session_data = cal_beh_metrics(session, save=False)
+            cal_beh_metrics(session)  # writes {session}_beh_metrics.json
+            json_file_path = os.path.join(session_dir['beh_fig_dir'], f'{session}_beh_metrics.json')
+            with open(json_file_path, 'r') as json_file:
+                session_data = json.load(json_file)
             session_data['session'] = session
             session_data['ani_id'] = session_dir['aniID']
             session_data['probe'] = df[df['session_id'] == session]['probe'].values[0] if 'probe' in df.columns else None
-        except:
-            print(f"Error processing session {session}")
+        except Exception as e:
+            print(f"Error processing session {session}: {e!r}")
+            traceback.print_exc()
             session_data = None
-        
+
     return session_data
 
 

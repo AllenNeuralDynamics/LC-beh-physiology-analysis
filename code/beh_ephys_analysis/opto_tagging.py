@@ -13,6 +13,7 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 import re 
 from utils.beh_functions import session_dirs
+from utils.isi_qc import DEFAULT_QC_ISI_MAX, default_qc, save_non_opto_isi
 from utils.plot_utils import shiftedColorMap, template_reorder, plot_raster_bar,merge_pdfs, combine_pdf_big
 from harp.clock import decode_harp_clock, align_timestamps_to_anchor_points
 from open_ephys.analysis import Session
@@ -380,18 +381,33 @@ def opto_plotting_unit(unit_id, spike_times, spike_amplitude, waveform, opto_wf,
         
         max_p_all = np.max(np.array(max_p_all))
         max_lat_all = np.max(np.array(max_lat_all))
-        pass_qc_curr = (qc_dict['isi_violations_ratio'] < 0.5) & \
-                (qc_dict['amplitude_cutoff'] < 0.05) & \
-                (qc_dict['decoder_label'] != 'noise') & \
-                (qc_dict['decoder_label'] != 'artifact')
-                
-                # (qc_dict['firing_rate'] > 0.1) & \
-                # # (qc_dict['presence_ratio'] > 0.95) & \
-        plt.suptitle(f"Unit {unit_id} Depth: {qc_dict['depth']:.2f} RespWin: {opto_info['resp_win']} s  pResp: {max_p_all:.2f} Lat: {max_lat_all:.2f} pass_qc {pass_qc_curr}")
+        # same criterion that is saved as default_qc (utils/isi_qc.default_qc), so the
+        # figure and the table cannot disagree
+        pass_qc_curr = default_qc(qc_dict, isi_col='isi_violations_ratio')
+        qc_label = f'pass_qc {pass_qc_curr}'
+        if 'isi_violations_ratio_nonopto' in qc_dict:
+            pass_qc_nonopto = default_qc(qc_dict, isi_col='isi_violations_ratio_nonopto',
+                                         fallback_isi_col='isi_violations_ratio')
+            qc_label += f' (laser-free ISI {pass_qc_nonopto})'
+        plt.suptitle(f"Unit {unit_id} Depth: {qc_dict['depth']:.2f} RespWin: {opto_info['resp_win']} s  pResp: {max_p_all:.2f} Lat: {max_lat_all:.2f} {qc_label}")
         plt.tight_layout()
     return fig, opto_tagging_dict, opto_tagging_df
 #%%
-def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thresh=0.015, plot = False, target_unit_ids=None, ephys_cut = False, save = False, drift_cut = True):
+def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thresh=0.015, plot = False, target_unit_ids=None, ephys_cut = False, save = False, drift_cut = True, qc_isi_source = 'all', isi_mode = 'block'):
+    """
+    Opto-tagging pass over one session.
+
+    qc_isi_source : {'all', 'nonopto'}
+        Which ISI-violations ratio default_qc is built from. 'all' is the pipeline
+        metric, computed by spikeinterface over the whole recording including the opto
+        blocks. 'nonopto' is the same metric recomputed on the laser-free portion only
+        (see utils/isi_qc), which stops laser artifacts and laser-driven bursts from
+        failing a unit. Either way both flags are saved, as default_qc_all_isi and
+        default_qc_nonopto, so the choice can be revisited without rerunning this.
+    isi_mode : {'block', 'train'}
+        Granularity of the laser exclusion for the non-opto ISI; see
+        utils.isi_qc.laser_intervals.
+    """
     session_dir = session_dirs(session)
     session_qm_file = os.path.join(session_dir['processed_dir'], f'{session}_qm.json')
     with open(session_qm_file) as f:
@@ -418,17 +434,9 @@ def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thres
     unit_qc = unit_qc.replace("<NA>", pd.NA)
     unit_qc['waveform_mean'] = nwb.units[:]['waveform_mean']
     unit_qc['waveform_sd'] = nwb.units[:]['waveform_sd']
-    unit_qc = unit_qc.apply(pd.to_numeric, errors='ignore') 
-    pass_qc = (unit_qc['isi_violations_ratio'] < 0.4) & \
-            (unit_qc['decoder_label'] != 'noise') & \
-            (unit_qc['decoder_label'] != 'artifact')
-            #     (unit_qc['firing_rate'] > 0.1) & \
-            # (unit_qc['presence_ratio'] > 0.95) & \
-            # (unit_qc['amplitude_cutoff'] < 0.05) & \
-    pass_qc = pass_qc.values
-    pass_qc = {unit_id: pass_qc_curr for unit_id, pass_qc_curr in zip(unit_ids, pass_qc)}
-    print(f'{sum(pass_qc.values())} out of {len(pass_qc)} units pass quality control')
-
+    unit_qc = unit_qc.apply(pd.to_numeric, errors='ignore')
+    # default_qc is computed further down, once the spike times needed for the laser-free
+    # ISI violations are loaded
 
     # load waveforms info
     with open(os.path.join(session_dir[f'opto_dir_{data_type}'], session+'_waveform_params.json')) as f:
@@ -438,6 +446,42 @@ def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thres
     # load opto responses
     with open(os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], 'spiketimes.pkl'), 'rb') as f:
         spiketimes = pickle.load(f)
+
+    # ISI violations over the laser-free portion of the recording, saved as a sidecar so
+    # that analyses reading unit tables pick it up (see utils/isi_qc). The pipeline's
+    # isi_violations_ratio counts laser artifacts and laser-driven bursts against a unit,
+    # which fails exactly the units the laser drives.
+    isi_nonopto = save_non_opto_isi(session, data_type=data_type, mode=isi_mode,
+                                    spiketimes=spiketimes)
+    if isi_nonopto is not None:
+        unit_qc = unit_qc.drop(columns=[col for col in isi_nonopto.columns if col != 'unit_id'],
+                               errors='ignore')
+        unit_qc = unit_qc.merge(isi_nonopto, left_on='ks_unit_id', right_on='unit_id',
+                                how='left').drop(columns=['unit_id'])
+
+    pass_qc_all_isi = default_qc(unit_qc, isi_col='isi_violations_ratio',
+                                 isi_max=DEFAULT_QC_ISI_MAX).values
+    if 'isi_violations_ratio_nonopto' in unit_qc.columns:
+        # units with no spikes left outside the laser windows fall back to the pipeline
+        # value rather than failing for lack of data
+        pass_qc_nonopto = default_qc(unit_qc, isi_col='isi_violations_ratio_nonopto',
+                                     fallback_isi_col='isi_violations_ratio',
+                                     isi_max=DEFAULT_QC_ISI_MAX).values
+    else:
+        pass_qc_nonopto = np.full(len(unit_qc), np.nan)
+    if qc_isi_source == 'nonopto':
+        pass_qc = pass_qc_nonopto
+    elif qc_isi_source == 'all':
+        pass_qc = pass_qc_all_isi
+    else:
+        raise ValueError(f"qc_isi_source must be 'all' or 'nonopto', got {qc_isi_source}")
+    pass_qc = {unit_id: pass_qc_curr for unit_id, pass_qc_curr in zip(unit_ids, pass_qc)}
+    pass_qc_all_isi = {unit_id: curr for unit_id, curr in zip(unit_ids, pass_qc_all_isi)}
+    pass_qc_nonopto = {unit_id: curr for unit_id, curr in zip(unit_ids, pass_qc_nonopto)}
+    print(f'{sum(pass_qc.values())} out of {len(pass_qc)} units pass quality control '
+          f'(ISI source: {qc_isi_source}); whole-recording ISI would pass '
+          f'{sum(pass_qc_all_isi.values())}, laser-free ISI {np.nansum(list(pass_qc_nonopto.values())):.0f}')
+
     with open(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_responses_{target}.pkl'), 'rb') as f:
         opto_responses = pickle.load(f)
     with open(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_waveforms_{target}.pkl'), 'rb') as f:
@@ -479,6 +523,8 @@ def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thres
     if target_unit_ids is None:
         target_unit_ids = unit_ids
     target_pass_qc = []
+    target_pass_qc_all_isi = []
+    target_pass_qc_nonopto = []
     opto_tagging_df_sess = pd.DataFrame()
     opto_tagging_df_sess_metrics = pd.DataFrame()
     for unit_id in target_unit_ids:
@@ -517,12 +563,18 @@ def opto_plotting_session(session, data_type, target, resp_thresh=0.8, lat_thres
         if not opto_tagging_df_curr.empty:
             opto_tagging_df_sess_metrics = pd.concat([opto_tagging_df_sess_metrics, opto_tagging_df_curr], ignore_index=True) # tidy
         target_pass_qc.append(pass_qc[unit_id])
+        target_pass_qc_all_isi.append(pass_qc_all_isi[unit_id])
+        target_pass_qc_nonopto.append(pass_qc_nonopto[unit_id])
         opto_pass_curr = True
         # if opto_tagging_dict_curr['opto_pass'] is None:
         #     opto_pass_curr = False
         opto_pass.append(opto_tagging_dict_curr['opto_pass'])
 
     opto_tagging_df_sess['default_qc'] = target_pass_qc
+    # both variants travel with the table so downstream work can switch without a rerun
+    opto_tagging_df_sess['default_qc_all_isi'] = target_pass_qc_all_isi
+    opto_tagging_df_sess['default_qc_nonopto'] = target_pass_qc_nonopto
+    opto_tagging_df_sess['default_qc_isi_source'] = qc_isi_source
     if save:
         opto_tagging_data = {'opto_tagging_df': opto_tagging_df_sess, 'opto_tagging_df_metrics': opto_tagging_df_sess_metrics}
         with open(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_tagging_metrics.pkl'), 'wb') as f:

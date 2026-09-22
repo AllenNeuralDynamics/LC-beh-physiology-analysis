@@ -1,5 +1,6 @@
 import numpy as np
 from scipy import stats
+from scipy.fft import next_fast_len, rfft, irfft
 import statsmodels.api as sm
 import re
 from PyPDF2 import PdfMerger
@@ -671,6 +672,96 @@ def correlate_nan_bi(x, y, lag='full'):
             if np.any(valid_mask):
                 corrs[i] = np.corrcoef(x[:-l][valid_mask], y[l:][valid_mask])[0, 1]
 
+    return corrs, lags
+
+
+def _pearson_lags_fft(x, y, max_lag):
+    """
+    Per-lag Pearson correlation between x and y for lags 0..max_lag, ignoring NaNs.
+
+    Numerically equivalent to looping np.corrcoef(x[:-l], y[l:]) over lags (i.e. to
+    correlate_nan), but evaluates every lag at once with FFTs: O(n log n) rather than
+    O(n * max_lag). x is centered internally, which leaves Pearson r unchanged but
+    avoids catastrophic cancellation in the per-lag variance terms.
+
+    Parameters:
+    x, y : array-like
+        Equal-length signals. NaN marks an invalid sample; a lag pair contributes
+        only if both of its members are valid.
+    max_lag : int
+        Largest lag, in samples.
+
+    Returns:
+    corrs : ndarray, shape (max_lag + 1,)
+        Pearson r at each lag, NaN where a lag has <2 valid pairs or zero variance.
+    n_valid : ndarray, shape (max_lag + 1,)
+        Number of valid pairs contributing to each lag.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if len(x) != len(y):
+        raise ValueError('x and y must have the same length')
+    n = len(x)
+    max_lag = int(max_lag)
+    if max_lag >= n:
+        raise ValueError(f'max_lag ({max_lag}) must be < signal length ({n})')
+
+    mask_x = np.isfinite(x)
+    mask_y = np.isfinite(y)
+    # centering is a no-op for Pearson r but keeps n*Sxx - Sx**2 well conditioned
+    x0 = np.where(mask_x, x - np.nanmean(x), 0.0)
+    y0 = np.where(mask_y, y - np.nanmean(y), 0.0)
+    mask_x = mask_x.astype(float)
+    mask_y = mask_y.astype(float)
+
+    nfft = next_fast_len(n + max_lag + 1)
+    spectra = {}
+
+    def _spectrum(key, a):
+        if key not in spectra:
+            spectra[key] = rfft(a, nfft)
+        return spectra[key]
+
+    def _corr(key_a, a, key_b, b):
+        """sum_i a[i] * b[i + l] for l = 0..max_lag"""
+        prod = np.conj(_spectrum(key_a, a)) * _spectrum(key_b, b)
+        return irfft(prod, nfft)[:max_lag + 1]
+
+    n_pairs = _corr('mx', mask_x, 'my', mask_y)
+    sum_x = _corr('x', x0, 'my', mask_y)
+    sum_y = _corr('mx', mask_x, 'y', y0)
+    sum_xx = _corr('xx', x0 ** 2, 'my', mask_y)
+    sum_yy = _corr('mx', mask_x, 'yy', y0 ** 2)
+    sum_xy = _corr('x', x0, 'y', y0)
+
+    with np.errstate(invalid='ignore', divide='ignore'):
+        cov = n_pairs * sum_xy - sum_x * sum_y
+        var_x = n_pairs * sum_xx - sum_x ** 2
+        var_y = n_pairs * sum_yy - sum_y ** 2
+        corrs = cov / np.sqrt(var_x * var_y)
+    n_valid = np.round(n_pairs).astype(int)
+    corrs[(n_valid < 2) | (var_x <= 0) | (var_y <= 0)] = np.nan
+    return corrs, n_valid
+
+
+def correlate_nan_fft(x, y, lag='full', return_n=False):
+    """FFT-based drop-in for correlate_nan: per-lag Pearson r for lags 0..lag."""
+    if lag == 'full':
+        lag = len(x) - 1
+    corrs, n_valid = _pearson_lags_fft(x, y, lag)
+    return (corrs, n_valid) if return_n else corrs
+
+
+def correlate_nan_bi_fft(x, y, lag='full', return_n=False):
+    """FFT-based drop-in for correlate_nan_bi: per-lag Pearson r for lags -lag..+lag."""
+    if lag == 'full':
+        lag = len(x) - 1
+    corrs_pos, n_pos = _pearson_lags_fft(x, y, lag)
+    corrs_neg, n_neg = _pearson_lags_fft(y, x, lag)
+    corrs = np.concatenate([corrs_neg[1:][::-1], corrs_pos])
+    lags = np.arange(-lag, lag + 1)
+    if return_n:
+        return corrs, lags, np.concatenate([n_neg[1:][::-1], n_pos])
     return corrs, lags
 
 

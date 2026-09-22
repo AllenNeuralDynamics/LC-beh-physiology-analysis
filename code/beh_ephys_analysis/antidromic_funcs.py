@@ -52,10 +52,16 @@ def opto_tagging_response(int_event_locked_timestamps, base_window, roi_window):
     else:
         return np.nan
 
-def antidromic_latency_jitter(int_event_locked_timestamps):
+def antidromic_latency_jitter(int_event_locked_timestamps, min_spikes=5):
     from scipy.ndimage import gaussian_filter1d
-    pulse_duration = 0.005 # ms    
+    pulse_duration = 0.005 # ms
     first_spikes_after_light = np.array([arr[arr > pulse_duration][0] for arr in int_event_locked_timestamps if np.any(arr > pulse_duration)])
+    # FWHM is meaningless below a handful of first spikes, and the degenerate cases look
+    # like real responses: an empty histogram peaks at bin 0 (latency 0.005) with jitter
+    # spanning the whole window, and a single spike gives jitter of exactly 0. Both would
+    # pass the jitter < 0.007 tier gate, so report them as undefined instead.
+    if first_spikes_after_light.size < min_spikes:
+        return np.nan, np.nan
     histogram, bins = np.histogram(first_spikes_after_light, bins=np.arange(pulse_duration, 0.1, 0.0005))
     # Convolve the histogram with a Gaussian kernel
     sigma = 0.5 / 1000 / (bins[1] - bins[0])  # Convert sigma to bin units    
@@ -70,6 +76,9 @@ def antidromic_latency_jitter(int_event_locked_timestamps):
     half_max = peak_value / 2
     above_half_max = np.where(smoothed_psth >= half_max)[0]
     fwhm = bins[above_half_max[-1]] - bins[above_half_max[0]]
+    # A peak confined to one bin is one bin wide, not zero wide. Reporting 0 here made the
+    # coarsest possible measurement look like the sharpest jitter in the dataset.
+    fwhm = max(fwhm, bins[1] - bins[0])
 
     antidromic_latency = peak_time
     antidromic_jitter = fwhm
@@ -399,9 +408,14 @@ def Avg_y_over_x(x, y, bin_size):
     Returns:
     pd.DataFrame: A DataFrame with columns for bin centers (x), average y values (y), and standard error of the mean (sem).
     """
-    # Calculate bin edges based on the bin size    
-    edges = np.arange(np.min(x), np.max(x) + bin_size, bin_size)
-    
+    # Calculate bin edges based on the bin size
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    # No finite x (e.g. no trial had an orthodromic spike): nothing to bin.
+    if x.size == 0 or not np.any(np.isfinite(x)):
+        return pd.DataFrame(columns=['x', 'y', 'sem']), np.array([])
+    edges = np.arange(np.nanmin(x), np.nanmax(x) + bin_size, bin_size)
+
     # Digitize x into bins
     x_index = np.digitize(x, edges) - 1  # Bin indices for each x value
     
@@ -421,13 +435,18 @@ def Avg_y_over_x(x, y, bin_size):
 
     return Avg, edges
 
-def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, tier_cat = False):
+def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, tier_cat = False,
+                                 soma_site='surface_DRN', min_spikes=5):
     """
     Analyze antidromic responses for a given set of opto-tagged units.
 
     Parameters:
         session_id (str): session id
         plot (bool): Whether to plot collision raster for each unit and site.
+        soma_site (str): Stimulation site over the recorded soma. It gets the late response
+            window and is excluded from collision testing; every other site is treated as a
+            projection target. Use 'surface_LC' for LC-NE sessions.
+        min_spikes (int): Minimum first-spikes-after-light required to report latency/jitter.
 
     Returns:
         pd.DataFrame: DataFrame containing antidromic response metrics and tier categorization.
@@ -477,7 +496,7 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
                 site = 'surface_LC'  # Treat 'surface' as 'surface_LC' for consistency
             
             # Set analysis windows
-            if site != 'surface_LC':
+            if site != soma_site:
                 base_window = (-0.02, 0)
                 roi_window = (0, 0.02)
             else:
@@ -521,9 +540,14 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
             # Statistical analysis
             opto_p_val = opto_tagging_response(int_event_locked_timestamps, base_window, roi_window)
             # Latency and jitter
-            antidromic_latency, antidromic_jitter = antidromic_latency_jitter(int_event_locked_timestamps)
+            antidromic_latency, antidromic_jitter = antidromic_latency_jitter(
+                int_event_locked_timestamps, min_spikes=min_spikes
+            )
             first_spikes_after_light = np.array([arr[arr > 0][0] for arr in int_event_locked_timestamps if np.any(arr > 0)])
-            median_first_spikes_after_light = np.median(first_spikes_after_light)
+            if first_spikes_after_light.size < min_spikes:
+                median_first_spikes_after_light = np.nan
+            else:
+                median_first_spikes_after_light = np.median(first_spikes_after_light)
 
             result = {                
                 'unit_id': unit_id,
@@ -535,8 +559,9 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
                 'jitter': antidromic_jitter
             }  
 
-            # Collision test for non-surface_LC sites
-            if site != 'surface_LC':
+            # Collision test for projection-target sites only, and only where the latency
+            # the test is built around is actually defined.
+            if site != soma_site and np.isfinite(antidromic_latency):
                 collision_results = collision_test(
                     int_event_locked_timestamps, antidromic_latency, bin_size=10, antidromic_jitter=0.005, plot=False
                 )
@@ -590,17 +615,22 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
         print("No antidromic results found.")   
         return None 
     antidromic_pivot = antidromic_df.pivot(index='unit_id', columns='site').reset_index()
+    merged_df = antidromic_pivot
     if tier_cat:
-        if any(col in event_ids.columns for col in ['surface_PrL', 'surface_V1', 'surface_S1', 'surface_SC']):
-            unit_tiers = antidromic_tier_categorization(antidromic_pivot)
+        # Sites are values in the 'site' column, not columns of event_ids: the old
+        # column-membership check was always False, so tiers were never computed.
+        if any(site != soma_site for site in antidromic_df['site'].unique()):
+            unit_tiers = antidromic_tier_categorization(antidromic_pivot, soma_site=soma_site)
             # print(unit_tiers)
-            unit_tiers_pivot = unit_tiers.pivot(index='unit_id', columns='site_for_tier', values='tier').reset_index()
-            merged_df = pd.merge(antidromic_pivot, unit_tiers_pivot, on='unit_id', how='outer')
+            # Attach tiers as ('antidromic_tier', site) so the saved file keeps the
+            # (metric, site) MultiIndex that the across-session combining code expects.
+            tier_wide = unit_tiers.pivot(index='unit_id', columns='site', values='tier')
+            merged_df = antidromic_pivot.copy()
+            for site in tier_wide.columns:
+                merged_df[('antidromic_tier', site)] = merged_df[('unit_id', '')].map(tier_wide[site])
         else:
-            merged_df = antidromic_pivot
-            merged_df['tier'] = 0
-    else:
-        merged_df = antidromic_pivot
+            merged_df = antidromic_pivot.copy()
+            merged_df[('antidromic_tier', '')] = 0
     
     # regression test 
     
@@ -609,18 +639,27 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
     return merged_df
 
 
-def antidromic_tier_categorization(antidromic_pivot):
+def antidromic_tier_categorization(antidromic_pivot, soma_site='surface_DRN'):
+    """Assign a tier per (unit, projection-target site).
+
+    Returns a long DataFrame with columns ['unit_id', 'site', 'tier'].
+    """
+    # Flatten on a copy. Assigning to the caller's .columns renamed its columns as a side
+    # effect, so the schema of the saved per-session pkl depended on whether tier_cat was
+    # set: MultiIndex when it was off, flat '<metric>_<site>' names when it was on.
     if isinstance(antidromic_pivot.columns, pd.MultiIndex):
+        antidromic_pivot = antidromic_pivot.copy()
         antidromic_pivot.columns = ['_'.join([str(i) for i in col if i]) for col in antidromic_pivot.columns.values]
 
     categories = []
     for idx, row in antidromic_pivot.iterrows():
         unit_id = row['unit_id']
-        tier = 0
-        site_for_tier = None
         for col in antidromic_pivot.columns:
-            if col.startswith('opto_p_val_') and not col.endswith('surface_LC'):
+            if col.startswith('opto_p_val_') and not col.endswith(soma_site):
                 site = col.replace('opto_p_val_', '')
+                # Reset per site: tier used to persist from the previous site in this row,
+                # so one qualifying site silently promoted every site after it.
+                tier = 0
                 opto_p_val = row.get(col, None)
                 opto_p_val_col = f'opto_p_val_{site}'
                 antidromic_latency_col = f'antidromic_latency_{site}'
@@ -642,8 +681,7 @@ def antidromic_tier_categorization(antidromic_pivot):
                     # if pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
                         tier = 1                    
                         print(f"Unit {unit_id} is categorized as tier {tier} for site {site} with antidromic latency: {antidromic_latency} and jitter: {jitter} and collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
-                site_for_tier = site
-                categories.append({'unit_id': unit_id, 'tier': tier, 'site_for_tier': f'{site_for_tier}_antidromic_tier'})
+                categories.append({'unit_id': unit_id, 'site': site, 'tier': tier})
 
                 # print(f"Unit {unit_id} is tier {tier} for site {site}, latency: {antidromic_latency}, jitter: {jitter}, collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
     return pd.DataFrame(categories)

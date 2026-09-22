@@ -1625,6 +1625,26 @@ def get_session_tbl(session, cut_interruptions = False):
         tbl = None
     return tbl
 
+def merge_isi_nonopto(session, unit_tbl, data_type):
+    """
+    Attach the laser-free ISI-violation columns to a unit table, if they exist.
+
+    Written by add_isi_nonopto.py (or by opto_tagging.opto_plotting_session) as a sidecar
+    next to the opto tagging outputs, so the columns reach every analysis without the
+    opto tagging pickles having to be regenerated. See utils/isi_qc.py.
+    """
+    # imported here, not at module level: utils.isi_qc imports session_dirs from this
+    # module
+    from utils.isi_qc import load_non_opto_isi
+    if unit_tbl is None or 'unit_id' not in unit_tbl.columns:
+        return unit_tbl
+    isi_tbl = load_non_opto_isi(session, data_type)
+    if isi_tbl is None:
+        return unit_tbl
+    new_cols = [col for col in isi_tbl.columns if col != 'unit_id']
+    unit_tbl = unit_tbl.drop(columns=new_cols, errors='ignore')
+    return pd.merge(unit_tbl, isi_tbl, on='unit_id', how='left')
+
 def get_unit_tbl(session, data_type, summary = True):
     session_dir = session_dirs(session)
     unit_tbl_summary = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_{data_type}_soma_opto_tagging_summary.pkl')
@@ -1632,7 +1652,7 @@ def get_unit_tbl(session, data_type, summary = True):
         unit_tbl_summary = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_{data_type}_soma_opto_tagging_summary_raw_wf.pkl')
     unit_tbl_dir = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_tagging_metrics.pkl')
     ccf_dir = os.path.join(session_dir[f'ephys_processed_dir_{data_type}'],'ccf_unit_locations.csv')
-    if summary: 
+    if summary:
         if os.path.exists(unit_tbl_summary):
             with open(unit_tbl_summary, 'rb') as f:
                   unit_data = pickle.load(f)
@@ -1648,11 +1668,11 @@ def get_unit_tbl(session, data_type, summary = True):
         else:
             print(f'No unit table found for {session} in {data_type} data.')
             return None
-        return unit_tbl
+        return merge_isi_nonopto(session, unit_tbl, data_type)
     elif os.path.exists(unit_tbl_dir):
         with open(unit_tbl_dir, 'rb') as f:
             unit_data = pickle.load(f)
-        return unit_data['opto_tagging_df']
+        return merge_isi_nonopto(session, unit_data['opto_tagging_df'], data_type)
     else:
         print(f'No unit table found for {session} in {data_type} data.')
         return None

@@ -74,8 +74,9 @@ from scipy.stats import pearsonr
 # # Pack data
 
 # %%
-criteria_name = 'basic_ephys_low'
+criteria_name = 'basic_ephys_low_DRN'
 capsure_dirs = capsule_directories()
+data_type = 'raw'
 # %%
 # load constraints and data
 with open(os.path.join(capsure_dirs["manuscript_fig_prep_dir"], 'combined_unit_tbl', 'combined_unit_tbl.pkl'), 'rb') as f:
@@ -96,7 +97,9 @@ combined_tagged_units_filtered, combined_tagged_units, fig, axes = apply_qc(comb
 # # Load antidromic units
 
 # %%
-session_list = combined_tagged_units_filtered[combined_tagged_units_filtered['probe']=='2']['session'].unique().tolist()
+# probe is int64 in combined_unit_tbl.pkl, so comparing to the string '2' matched no rows.
+probe_mask = combined_tagged_units_filtered['probe'].astype(str) == '2'
+session_list = combined_tagged_units_filtered[probe_mask]['session'].unique().tolist()
 file = os.path.join(beh_folder, 'combined_antidromic_results.pkl')
 re_compute = True
 # if os.path.exists(file):
@@ -108,16 +111,59 @@ re_compute = True
 #     re_compute = True
 
 # %%
+def to_site_multiindex(df):
+    """Return df with (metric, site) MultiIndex columns.
+
+    Per-session pkls come in two vintages: MultiIndex columns, and columns already
+    flattened to '<metric>_<site>' (plus '<site>_antidromic_tier'), which is what
+    antidromic_tier_categorization used to leave behind when tier_cat was set. Concatenating
+    the two vintages collapses to a flat index holding a mix of strings and tuples, and the
+    per-focus column selection below then drops every flattened session. Rebuild the
+    MultiIndex so both vintages line up.
+    """
+    if isinstance(df.columns, pd.MultiIndex):
+        return df
+    prefix = 'opto_p_val_'
+    sites = sorted(
+        (str(c)[len(prefix):] for c in df.columns if str(c).startswith(prefix)),
+        key=len,
+        reverse=True,
+    )
+    tuples = []
+    for col in df.columns:
+        col = str(col)
+        for site in sites:
+            if col.endswith(f'_{site}'):
+                tuples.append((col[: -(len(site) + 1)], site))
+                break
+            if col.startswith(f'{site}_'):
+                tuples.append((col[len(site) + 1:], site))
+                break
+        else:
+            tuples.append((col, ''))
+    df = df.copy()
+    df.columns = pd.MultiIndex.from_tuples(tuples)
+    return df
+
+
+# %%
 if re_compute:
     concatenate_antidromic_results_all = []
+    missing_sessions = []
     for session in session_list:
         session_dir = session_dirs(session)
-        save_dir = os.path.join(session_dir['opto_dir_curated'], f'{session}_antidromic_results.pkl')
+        save_dir = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_antidromic_results.pkl')
         if os.path.exists(save_dir):
             with open(save_dir, 'rb') as f:
                 merged_df = pickle.load(f)
-            merged_df['session'] = session
+            merged_df = to_site_multiindex(merged_df)
+            merged_df[('session', '')] = session
             concatenate_antidromic_results_all.append(merged_df)
+        else:
+            missing_sessions.append(session)
+    print(f'Antidromic results found for {len(concatenate_antidromic_results_all)}/{len(session_list)} sessions')
+    if missing_sessions:
+        print(f'No {data_type} antidromic pkl for {len(missing_sessions)} sessions: {missing_sessions}')
     concatenate_antidromic_results = pd.concat(concatenate_antidromic_results_all, ignore_index=True)
     concatenate_antidromic_results.rename(columns={'unit_id': 'unit'}, inplace=True)
     file = os.path.join(beh_folder, 'combined_antidromic_results.pkl')
