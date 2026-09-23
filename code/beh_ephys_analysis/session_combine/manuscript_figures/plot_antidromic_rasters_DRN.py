@@ -1,9 +1,14 @@
 """Raster pages for the DRN antidromic candidate units, for eyeballing real spike vs artifact.
 
-Plots every unit that passed any sharp/collision criterion at either stimulation site
-(evidence_rank <= 3 in the per-site lookup tables written by F_antidromic_combined_DRN.ipynb),
-one page per unit, all emission sites side by side so the somatic DRN response can be compared
-against the putative antidromic PrL/S1 responses in the same unit.
+Plots every unit that passed any sharp/collision criterion at either stimulation site, one page
+per unit, all emission sites side by side so the somatic DRN response can be compared against
+the putative antidromic PrL/S1 responses in the same unit.
+
+Input is the per-site lookup tables plus evidence_rank_definitions.csv, all written by section
+11b of F_antidromic_combined_DRN.ipynb -- re-run that section after adding sessions, or these
+rasters silently describe the old unit set. Which evidence_rank values count as sharp/collision
+is read out of the definitions table by level name rather than hard-coded here, so extending the
+ladder in the notebook cannot quietly change the selection.
 
 Two PDFs are produced: a zoomed page (-10..40 ms), which is the one that shows whether a
 light-locked spike has plausible jitter, and the full window (-100..70 ms) that the original
@@ -40,14 +45,44 @@ VIEWS = {
 }
 
 
+REGEN_HINT = ('Run section 11b of session_combine/manuscript_figures/F_antidromic_combined_DRN.ipynb '
+              'to (re)write the criteria lookup tables.')
+
+
+def load_table(name):
+    path = os.path.join(TABLE_DIR, f'{name}.csv')
+    if not os.path.exists(path):
+        raise FileNotFoundError(f'{path} not found. {REGEN_HINT}')
+    return pd.read_csv(path)
+
+
 def load_lookup():
     """Per-(unit, site) criteria rows, both focuses stacked."""
     frames = []
     for focus in FOCUSES:
-        d = pd.read_csv(os.path.join(TABLE_DIR, f'unit_criteria_lookup_{focus}.csv'))
+        d = load_table(f'unit_criteria_lookup_{focus}')
+        missing = [c for c in ('evidence_rank', 'criteria_passed', 'degenerate_fit')
+                   if c not in d.columns]
+        if missing:
+            raise KeyError(f'unit_criteria_lookup_{focus}.csv is missing {missing}, so it '
+                           f'predates the evidence ladder. {REGEN_HINT}')
         d['focus'] = focus
         frames.append(d)
     return pd.concat(frames, ignore_index=True)
+
+
+def sharp_or_collision_ranks():
+    """evidence_rank values that count as sharp/collision evidence, by level name.
+
+    Membership rather than a `<= cutoff` test, so the flagged levels do not have to sit at the
+    top of the ladder for the selection to stay correct.
+    """
+    defs = load_table('evidence_rank_definitions')
+    ranks = defs.loc[defs.sharp_or_collision.astype(bool), 'evidence_rank']
+    if ranks.empty:
+        raise ValueError('no levels flagged sharp_or_collision in '
+                         f'evidence_rank_definitions.csv. {REGEN_HINT}')
+    return sorted(int(r) for r in ranks)
 
 
 def page_label(rows):
@@ -73,12 +108,15 @@ def main():
     lookup = load_lookup()
     if args.all_units:
         keep = lookup[['session', 'unit']].drop_duplicates()
+        selection = 'all units in the lookup table'
     else:
-        keep = lookup.loc[lookup.evidence_rank <= 3, ['session', 'unit']].drop_duplicates()
+        ranks = sharp_or_collision_ranks()
+        keep = lookup.loc[lookup.evidence_rank.isin(ranks), ['session', 'unit']].drop_duplicates()
+        selection = f'evidence_rank in {ranks} at either site'
     keep = keep.sort_values(['session', 'unit'])
     if args.max_units:
         keep = keep.head(args.max_units)
-    print(f'{len(keep)} units across {keep.session.nunique()} sessions')
+    print(f'{len(keep)} units across {keep.session.nunique()} sessions ({selection})')
 
     for view in VIEWS:
         os.makedirs(os.path.join(OUT_DIR, view), exist_ok=True)
