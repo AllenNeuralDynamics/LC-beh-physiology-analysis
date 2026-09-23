@@ -91,12 +91,30 @@ def regressors_to_formula(response_var, regressors):
 # # Dataframe generation
 
 # %%
+def nan_result(session, unit_id):
+    """All-NaN row, shaped like process()'s return, for units that cannot be fitted."""
+    n_reg = len(regressors_focus_all) + len(regressors_focus_hit)
+    out = {'session': session, 'unit': unit_id}
+    for period in ('ratio', 'baseline', 'response'):
+        out[f'coefs_{period}'] = np.full(n_reg, np.nan)
+        out[f'T_{period}'] = np.full(n_reg, np.nan)
+        out[f'p_{period}'] = np.full(n_reg, np.nan)
+        out[f'r2_{period}'] = [np.nan, np.nan]
+    return out
+
+
 def process(session, unit_id, rec_side, formula_all, formula_hit, focus_all, focus_hit, align_name = 'go_cue'):
     session_dir = session_dirs(session)
     unit_tbl = get_unit_tbl(session, data_type)
     session_df = get_session_tbl(session, cut_interruptions=True)
     session_df['hit'] = session_df['animal_response'] != 2
-    session_df['trial_ind'] = np.arange(len(session_df))
+    # Do NOT re-index trial_ind here. get_session_tbl already sets trial_ind from the
+    # index of the *uncut* table, which is the convention the drift trial table uses
+    # (generate_session_opto_drift_trial_table indexes trials of get_session_tbl(session)
+    # with no cut_interruptions). Overwriting it with arange(len(session_df)) shifts it by
+    # the number of leading trials cut_interruptions drops -- nonzero in 15 of the 36
+    # beh_all sessions, up to 273 trials -- so the amp/motion merge below silently pairs
+    # each trial with a different trial's amplitude.
     # add svs column
     svs = ((session_df['animal_response'].values[1:]==1) & (session_df['animal_response'].values[:-1]==0)) | ((session_df['animal_response'].values[1:]==0) & (session_df['animal_response'].values[:-1]==1))
     svs = np.concatenate(([0], svs.astype(int)))
@@ -125,9 +143,23 @@ def process(session, unit_id, rec_side, formula_all, formula_hit, focus_all, foc
             spike_times_curr = spike_times_curr[spike_times_curr <= unit_drift['ephys_cut'][1]]
             session_df_curr = session_df_curr[session_df_curr['goCue_start_time'] <= unit_drift['ephys_cut'][1]]
             # tblTrials_curr = tblTrials_curr[tblTrials_curr['goCue_start_time'] <= unit_drift['ephys_cut'][1]]
+    # Some units' ephys_cut leaves no usable trials at all (4 of the 128 beh_all units:
+    # their cut ends before the first trial of the interruption-free block), and
+    # align.to_events raises on an empty align_time. Bail out with NaNs instead.
+    min_trials = 20
+    if len(session_df_curr) < min_trials or int(session_df_curr['hit'].sum()) < min_trials:
+        print(f'{session} {unit_id}: only {len(session_df_curr)} trials '
+              f'({int(session_df_curr["hit"].sum())} hit) after the drift cut, skipping')
+        return nan_result(session, unit_id)
     if 'amp_abs' in formula_hit or 'amp' in formula_hit or 'amp_abs' in formula_all or 'amp' in formula_all:
         # get unit_trial_drift_curr's rows corresponding to the ones in session_df_curr
         session_df_curr = session_df_curr.merge(unit_trial_drift_curr, on='trial_ind', how='left').copy()
+        # the merge is on trial_ind; if it ever silently fails to match, amp becomes all
+        # NaN and patsy drops every row, so check rather than fit on nothing
+        if session_df_curr['amp'].isna().all():
+            print(f'{session} {unit_id}: amp all NaN after merging the drift trial table '
+                  f'(trial_ind mismatch), skipping')
+            return nan_result(session, unit_id)
     if align_name == 'go_cue':
         if 'go_cue' in session_df_curr.columns:
             align_time = session_df_curr['go_cue'].values
@@ -312,7 +344,7 @@ def process(session, unit_id, rec_side, formula_all, formula_hit, focus_all, foc
 # ------------------------------------------------------------------
 # Parameters
 # ------------------------------------------------------------------
-data_type = 'curated'
+data_type = 'raw'
 target = 'soma'
 align_name = 'go_cue'
 regressors_focus_all = ['hit', 'amp', 'Intercept','svs']
@@ -332,8 +364,11 @@ n_regressors = len(regressors_focus_all)+len(regressors_focus_hit)
 # ------------------------------------------------------------------
 def safe_process(row, formula_all, formula_hit, regressors_focus_all, regressors_focus_hit):
     """Wrapper to safely call process() and catch errors."""
-    # try:
-    return process(row['session'], row['unit'], row['rec_side'], formula_all, formula_hit, regressors_focus_all, regressors_focus_hit, align_name='go_cue')
+    try:
+        return process(row['session'], row['unit'], row['rec_side'], formula_all, formula_hit, regressors_focus_all, regressors_focus_hit, align_name='go_cue')
+    except Exception as e:
+        print(f"[Error] session {row['session']}, unit {row['unit']}: {type(e).__name__}: {e}")
+        return nan_result(row['session'], row['unit'])
     # except Exception as e:
     #     print(f"[Error] session {row['session']}, unit {row['unit']}: {e}")
     #     return {'session': row['session'],

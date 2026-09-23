@@ -202,35 +202,34 @@ for focus in focuses:
     combined_df['p_antidromic_log'] = -np.log10(combined_df['p_antidromic'] + 1e-20)
 
     # --- Tier logic ---
-    combined_df['tier_1'] = (
-        (combined_df['jitter'] < 0.01)
-        & (combined_df['p_antidromic'] < 0.005)
-        & (combined_df['t_antidromic'] > 0)
-        & (combined_df['p_collision'] < 0.005)
-        & (combined_df['t_collision'] > 0)
-    ).astype(float)
+    # These are the regression-based criteria (p_antidromic / p_collision from
+    # antidromic_regression_analysis), a separate scheme from the ('antidromic_tier', site)
+    # column that antidromic_tier_categorization writes into the per-session pkls, which
+    # uses opto_p_val / jitter / the Fisher collision test at alpha 0.05.
+    #
+    # The columns are named for what they test. The old names are kept as aliases at the
+    # bottom of this script, but they misled: 'short' is jitter < 10 ms AND latency
+    # >= 25 ms, i.e. the *late* responses, and the '_long' suffix meant "no jitter gate",
+    # not long latency. Nesting, from strictest:
+    #   sharp_antidromic_collision  antidromic + collision, jitter-gated  (was tier_1)
+    #   sharp_antidromic            antidromic only, jitter-gated         (was tier_2)
+    #   antidromic_collision        antidromic + collision, any jitter    (was tier_1_long)
+    #   antidromic                  antidromic only, any jitter           (was tier_2_long)
+    # so sharp_antidromic_collision subset of {sharp_antidromic, antidromic_collision}
+    # subset of antidromic.
+    is_sharp = combined_df['jitter'] < 0.01
+    is_antidromic = (combined_df['p_antidromic'] < 0.005) & (combined_df['t_antidromic'] > 0)
+    is_collision = (combined_df['p_collision'] < 0.005) & (combined_df['t_collision'] > 0)
 
-    combined_df['tier_2'] = (
-        (combined_df['jitter'] < 0.01)
-        & (combined_df['p_antidromic'] < 0.005)
-        & (combined_df['t_antidromic'] > 0)
-    ).astype(float)
+    combined_df['antidromic'] = is_antidromic.astype(float)
+    combined_df['antidromic_collision'] = (is_antidromic & is_collision).astype(float)
+    combined_df['sharp_antidromic'] = (is_sharp & is_antidromic).astype(float)
+    combined_df['sharp_antidromic_collision'] = (is_sharp & is_antidromic & is_collision).astype(float)
 
-    combined_df['tier_1_long'] = (
-        (combined_df['p_antidromic'] < 0.005)
-        & (combined_df['t_antidromic'] > 0)
-        & (combined_df['p_collision'] < 0.005)
-        & (combined_df['t_collision'] > 0)
-    ).astype(float)
-
-    combined_df['tier_2_long'] = (
-        (combined_df['p_antidromic'] < 0.005)
-        & (combined_df['t_antidromic'] > 0)
-    ).astype(float)
-
-    combined_df['short'] = (
-        (combined_df['jitter'] < 0.01)
-        & (combined_df['antidromic_latency'] >= 0.025)
+    # Sharp but late (>= 25 ms): too slow for a monosynaptic antidromic spike at these
+    # distances, so tracked separately rather than as a tier.
+    combined_df['sharp_late_latency'] = (
+        is_sharp & (combined_df['antidromic_latency'] >= 0.025)
     ).astype(float)
 
     all_focus_dfs.append(combined_df)
@@ -239,7 +238,22 @@ for focus in focuses:
 combined_all_focus_df = pd.concat(all_focus_dfs, ignore_index=True)
 
 # --- Clean up tier columns ---
-tier_cols = ['tier_1', 'tier_2', 'tier_1_long', 'tier_2_long', 'short']
+tier_cols = [
+    'sharp_antidromic_collision',
+    'sharp_antidromic',
+    'antidromic_collision',
+    'antidromic',
+    'sharp_late_latency',
+]
+# Old name -> new name, applied to both the flag and its '<tier>_focus' companion after the
+# per-unit aggregation below, so existing notebooks and figure code keep working.
+TIER_ALIASES = {
+    'tier_1': 'sharp_antidromic_collision',
+    'tier_2': 'sharp_antidromic',
+    'tier_1_long': 'antidromic_collision',
+    'tier_2_long': 'antidromic',
+    'short': 'sharp_late_latency',
+}
 # for c in tier_cols:
 #     if c in combined_all_focus_df.columns:
 #         combined_all_focus_df[c] = combined_all_focus_df[c].fillna(0).astype(float)
@@ -283,6 +297,12 @@ final_combined_df = (
     best_rows.drop(columns=tier_cols, errors='ignore')
     .merge(tier_focus_df, on=['session', 'unit'], how='left')
 )
+
+# --- Back-compatible aliases for the old tier names ---
+for old_name, new_name in TIER_ALIASES.items():
+    final_combined_df[old_name] = final_combined_df[new_name]
+    if f'{new_name}_focus' in final_combined_df.columns:
+        final_combined_df[f'{old_name}_focus'] = final_combined_df[f'{new_name}_focus']
 
 # --- Save result ---
 combined_df = combined_tagged_units_filtered.merge(final_combined_df, on=['session', 'unit'], how='inner')

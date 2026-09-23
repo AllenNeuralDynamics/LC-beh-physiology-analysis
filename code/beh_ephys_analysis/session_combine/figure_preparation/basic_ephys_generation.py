@@ -116,7 +116,7 @@ def process(session, unit_id, in_df):
         qm_dict = json.load(f)
     rec_start = qm_dict['ephys_cut'][0]
     rec_end = qm_dict['ephys_cut'][1]
-    opto_file = os.path.join(session_dir['opto_dir_curated'], 
+    opto_file = os.path.join(session_dir[f'opto_dir_{data_type}'],
                                 f'{session}_opto_session.csv')
     if os.path.exists(opto_file):
         opto_tbl = pd.read_csv(opto_file)
@@ -418,7 +418,7 @@ def process(session, unit_id, in_df):
             }
 
 # %%
-data_type = 'curated'
+data_type = 'raw'
 target = 'soma'
 
 pre_event = -1.5
@@ -529,7 +529,7 @@ def process_acf(session, unit_id, in_df):
         qm_dict = json.load(f)
     rec_start = qm_dict['ephys_cut'][0]
     rec_end = qm_dict['ephys_cut'][1]
-    opto_file = os.path.join(session_dir['opto_dir_curated'], 
+    opto_file = os.path.join(session_dir[f'opto_dir_{data_type}'],
                                 f'{session}_opto_session.csv')
     if os.path.exists(opto_file):
         opto_tbl = pd.read_csv(opto_file)
@@ -691,7 +691,7 @@ def process_acf(session, unit_id, in_df):
 
 # %%
 
-data_type = 'curated'
+data_type = 'raw'
 target = 'soma'
 
 auto_inhi_bin = 0.03

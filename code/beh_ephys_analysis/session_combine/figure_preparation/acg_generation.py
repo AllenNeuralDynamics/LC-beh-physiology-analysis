@@ -268,7 +268,7 @@ fig.savefig(fname=os.path.join(target_folder, f'pca_denoised_acg_examples_bl.pdf
 # %%
 # Compare same neuron's baseline and overall acg after cleaning
 fig, axes = plt.subplots(5, 3, figsize=(20, 12), sharex=True, sharey=True)
-samples = np.random.default_rng(0).choice(X.shape[0], size=15, replace=False) + 5
+samples = (np.random.default_rng(0).choice(X.shape[0], size=15, replace=False) + 5) % X.shape[0]
 for i, idx in enumerate(samples):
     ax = axes[i // 3, i % 3]
     ax.plot(x, auto_corr_mat_bl_denoised[idx], color="b", alpha=0.5, label="Baseline ACG (denoised)")
@@ -344,6 +344,10 @@ def fit_acf(acf, dt, ftol=1e-12, xtol=1e-12, gtol=1e-12, verbose=0, p0=None):
     # [A1, tau1, A2, peak2,  k2,  A3, peak3]
     lower = [-1.0, 0.01,   -1.0, dt,  2.0, 0.0, 0.4]
     upper = [1.0, 0.20, 1.0, 0.4, 8, 0.2, 1.20]
+
+    # A1/A2/A3 are read off the ACF, so a unit with deep long-lag inhibition can start
+    # outside these bounds (A3 > 0.2) and least_squares rejects the guess outright.
+    p0 = np.clip(p0, lower, upper)
 
     # ---------- Least Squares ----------
     res = least_squares(
@@ -538,7 +542,10 @@ C3_mat = np.array(C3_mat)
 
 
 # %%
-g = sns.pairplot(all_params_df[['A1', 'tau1', 'A2', 'peak2', 'k2', 'A3', 'peak3', 'r2', 'adj_r2', 'P1', 'P2', 'P3']])
+# A3/P3 collapse to denormals (~1e-44) whenever the long-inhibition component is absent,
+# which spans ~320 decades and makes Freedman-Diaconis ask for ~1e36 bins. Pin the bins.
+g = sns.pairplot(all_params_df[['A1', 'tau1', 'A2', 'peak2', 'k2', 'A3', 'peak3', 'r2', 'adj_r2', 'P1', 'P2', 'P3']],
+                 diag_kws={'bins': 30})
 g.fig.savefig(os.path.join(target_folder, 'acf_fit_parameters_pairplot.pdf'), dpi=300, bbox_inches='tight')
 
 # %%

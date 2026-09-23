@@ -85,9 +85,14 @@ def antidromic_latency_jitter(int_event_locked_timestamps, min_spikes=5):
     return antidromic_latency, antidromic_jitter
 
 
-def plot_opto_responses(unit_tbl, event_ids):
+def plot_opto_responses(unit_tbl, event_ids, time_range_raster=(-0.100, 0.070), sites=None):
     """
     Find antidromic units based on opto stimulation data.
+
+    time_range_raster: raster/PSTH x-limits in s. The default full window is too coarse to
+        judge whether a light-locked spike is a real spike or an artifact; pass something like
+        (-0.010, 0.040) for a zoomed page.
+    sites: restrict/order the emission locations plotted as columns (default: all present).
     """
     # Filter for opto tagged units
     # opto_criteria = (unit_tbl['opto_pass'] == True) & (unit_tbl['default_qc'] == True)
@@ -96,20 +101,28 @@ def plot_opto_responses(unit_tbl, event_ids):
 
     
     # Unique values
-    sites = list(np.unique(event_ids.emission_location))
+    present_sites = list(np.unique(event_ids.emission_location))
+    if sites is None:
+        sites = present_sites
+    else:
+        sites = [s for s in sites if s in present_sites]
     powers = list(np.unique(event_ids.power))
     trial_types = np.unique(event_ids.type)
 
-    
+
     # Settings
     prepost = 'post'
     num_sites = len(sites)
     num_units = len(opto_units)
+    time_range_raster = np.asarray(time_range_raster, dtype=float)
 
-    # Create one figure for all units × sites (3 rows per unit: raster + PSTH + antidromic raster)
+    # Create one figure for all units × sites, 6 rows per unit: raster, first-spike-sorted
+    # raster, PSTH, first-spike histogram, collision curve, spacer. The panels below index
+    # rows as 6*u_idx + k; with the old stride of 5 the second unit's raster landed on the
+    # first unit's collision panel.
     fig_height_per_unit = 10
-    fig = plt.figure(figsize=(num_sites * 4, num_units * fig_height_per_unit))   
-    gs = gridspec.GridSpec(6 * num_units, num_sites, height_ratios=[3, 6, 2, 0.5, 1, 1] * num_units, hspace=0.8)
+    fig = plt.figure(figsize=(num_sites * 4, num_units * fig_height_per_unit))
+    gs = gridspec.GridSpec(6 * num_units, num_sites, height_ratios=[3, 6, 2, 1.5, 1.5, 0.8] * num_units, hspace=0.8)
 
     # Loop through units
     for u_idx, unit_id in enumerate(opto_units):
@@ -127,11 +140,16 @@ def plot_opto_responses(unit_tbl, event_ids):
                 roi_window = (0.03, 0.05)    
 
 
-            # Filter trials
-            tag_trials = event_ids.query('site == @site and pre_post == @prepost')
+            # Filter trials. The fallback is per site and keeps the site fixed: it used to
+            # reassign the shared `prepost` and query surface_LC by name, so one site without
+            # 'post' trials silently swapped every later column to LC 'pre' trials.
+            this_prepost = prepost
+            tag_trials = event_ids.query('site == @site and pre_post == @this_prepost')
             if tag_trials.empty:
-                prepost = 'pre'
-                tag_trials = event_ids.query('site == "surface_LC" and pre_post == @prepost')
+                this_prepost = 'pre'
+                tag_trials = event_ids.query('site == @site and pre_post == @this_prepost')
+            if tag_trials.empty:
+                continue
             max_power = tag_trials.power.max()
             tag_trials = tag_trials.query('power == @max_power')
             if tag_trials.empty:
@@ -142,8 +160,7 @@ def plot_opto_responses(unit_tbl, event_ids):
             num_pulses = np.unique(tag_trials.num_pulses)[0]
             pulse_interval = np.unique(tag_trials.pulse_interval)[0]
 
-            # Time window
-            time_range_raster = np.array([-100 / 1000, 70 / 1000])
+            # Time window (set by the time_range_raster argument)
             this_event_timestamps = tag_trials.time.tolist()
 
             int_event_locked_timestamps = []
@@ -162,7 +179,7 @@ def plot_opto_responses(unit_tbl, event_ids):
 
             int_event_locked_timestamps = remove_spikes_during_laser_pulse(int_event_locked_timestamps, duration)
             # Raster plot
-            ax_raster = fig.add_subplot(gs[5 * u_idx, i])
+            ax_raster = fig.add_subplot(gs[6 * u_idx, i])
             pf.raster_plot(int_event_locked_timestamps, time_range_raster, cond_each_trial=pulse_nums, ms=100, ax=ax_raster)
             p_val = opto_tagging_response(int_event_locked_timestamps, base_window, roi_window)
 
@@ -193,10 +210,9 @@ def plot_opto_responses(unit_tbl, event_ids):
 
             # Add laser pulse aligned but sorted by spike times
             # Antidromic raster plot
-            ax_antidromic = fig.add_subplot(gs[5 * u_idx + 1, i], sharex=ax_raster)
+            ax_antidromic = fig.add_subplot(gs[6 * u_idx + 1, i], sharex=ax_raster)
             sorted_data = sorted(int_event_locked_timestamps, key=lambda x: (len(x) == 0, x[0] if len(x) > 0 else np.inf))
-            pf.raster_plot(sorted_data, time_range_raster)
-            # pf.raster_plot(sorted_data, time_range_raster, ax=ax_antidromic)
+            pf.raster_plot(sorted_data, time_range_raster, ax=ax_antidromic)
 
             yLims = np.array(ax_antidromic.get_ylim())
             rect = patches.Rectangle((0, yLims[0]), duration / 1000, yLims[1] - yLims[0],
@@ -214,7 +230,7 @@ def plot_opto_responses(unit_tbl, event_ids):
                 ax_antidromic.set_yticklabels([])
 
             # PSTH plot
-            ax_psth = fig.add_subplot(gs[5 * u_idx + 2, i], sharex=ax_raster)
+            ax_psth = fig.add_subplot(gs[6 * u_idx + 2, i], sharex=ax_raster)
             psth, _, bins = pf.psth(int_event_locked_timestamps, time_range_raster, bin_size=0.003, smooth_window_size=3)
             antidromic_latency, antidromic_jitter = antidromic_latency_jitter(int_event_locked_timestamps)
             if antidromic_jitter > antidromic_latency:
@@ -260,7 +276,7 @@ def plot_opto_responses(unit_tbl, event_ids):
             hist, bin_edges = np.histogram(first_post_stim_spike_times, bins=bin_num)
             peak_x = bin_edges[np.argmax(hist)]
             antidromic_latency = peak_x
-            ax_latency = fig.add_subplot(gs[5 * u_idx + 3, i])
+            ax_latency = fig.add_subplot(gs[6 * u_idx + 3, i])
             ax_latency.plot(bin_edges[:-1], hist, color='k')
             ax_latency.axvline(antidromic_latency, color='r', linestyle='--', label=f'Peak: {antidromic_latency:.3f} s')
             ax_latency.set_xlabel('First post-stimulus spike time (s)')
@@ -311,7 +327,7 @@ def plot_opto_responses(unit_tbl, event_ids):
             statistic, p_value = mannwhitneyu(early_probs, near_latency_probs, alternative='greater')
             # Plot binned averages
             result, edges = Avg_y_over_x(x, y, bin_size=10)
-            ax_compare = fig.add_subplot(gs[5 * u_idx + 4, i])
+            ax_compare = fig.add_subplot(gs[6 * u_idx + 4, i])
             ax_compare.errorbar(result['x'], result['y'], yerr=result['sem'], fmt='o-', label='Average ± SEM')
             ax_compare.set_xlabel('Time from antidromic latency (ms)')
             ax_compare.set_ylabel('P(antidromic spike)')
@@ -436,17 +452,21 @@ def Avg_y_over_x(x, y, bin_size):
     return Avg, edges
 
 def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, tier_cat = False,
-                                 soma_site='surface_DRN', min_spikes=5):
+                                 soma_site='surface_DRN', min_spikes=5, tier_kwargs=None):
     """
     Analyze antidromic responses for a given set of opto-tagged units.
 
     Parameters:
         session_id (str): session id
         plot (bool): Whether to plot collision raster for each unit and site.
+        tier_cat (bool): Whether to attach ('antidromic_tier', site) and
+            ('antidromic_tier_label', site) columns via antidromic_tier_categorization.
         soma_site (str): Stimulation site over the recorded soma. It gets the late response
             window and is excluded from collision testing; every other site is treated as a
             projection target. Use 'surface_LC' for LC-NE sessions.
         min_spikes (int): Minimum first-spikes-after-light required to report latency/jitter.
+        tier_kwargs (dict): Optional overrides forwarded to antidromic_tier_categorization
+            (opto_p_thresh, max_jitter, max_antidromic_latency, collision_p_thresh, verbose).
 
     Returns:
         pd.DataFrame: DataFrame containing antidromic response metrics and tier categorization.
@@ -620,17 +640,24 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
         # Sites are values in the 'site' column, not columns of event_ids: the old
         # column-membership check was always False, so tiers were never computed.
         if any(site != soma_site for site in antidromic_df['site'].unique()):
-            unit_tiers = antidromic_tier_categorization(antidromic_pivot, soma_site=soma_site)
-            # print(unit_tiers)
+            unit_tiers = antidromic_tier_categorization(
+                antidromic_pivot, soma_site=soma_site, **(tier_kwargs or {})
+            )
             # Attach tiers as ('antidromic_tier', site) so the saved file keeps the
             # (metric, site) MultiIndex that the across-session combining code expects.
+            # The label travels alongside the code because the code is not monotone in
+            # evidence (0 = none sorts below 1 = strongest), so it cannot be aggregated
+            # or thresholded numerically.
             tier_wide = unit_tiers.pivot(index='unit_id', columns='site', values='tier')
+            label_wide = unit_tiers.pivot(index='unit_id', columns='site', values='tier_label')
             merged_df = antidromic_pivot.copy()
             for site in tier_wide.columns:
                 merged_df[('antidromic_tier', site)] = merged_df[('unit_id', '')].map(tier_wide[site])
+                merged_df[('antidromic_tier_label', site)] = merged_df[('unit_id', '')].map(label_wide[site])
         else:
             merged_df = antidromic_pivot.copy()
             merged_df[('antidromic_tier', '')] = 0
+            merged_df[('antidromic_tier_label', '')] = ANTIDROMIC_TIER_LABELS[0]
     
     # regression test 
     
@@ -639,10 +666,65 @@ def analyze_antidromic_responses(session_id, data_type ='curated', plot=False, t
     return merged_df
 
 
-def antidromic_tier_categorization(antidromic_pivot, soma_site='surface_DRN'):
+# Tier codes, strongest evidence first. The codes are nested: a unit x site can only reach a
+# stronger (lower-numbered) tier by also meeting every criterion of the weaker tiers. The scale
+# is not monotone -- 0 means "no evidence" and sorts below 1, which is the strongest -- so never
+# aggregate the code with max()/min() or threshold it with >=. Use the label for that.
+ANTIDROMIC_TIER_LABELS = {
+    1: 'collision',    # responsive + sharp short-latency peak + collision-confirmed
+    2: 'jitter',       # responsive + sharp short-latency peak, collision not confirmed
+    3: 'responsive',   # significant light-evoked response only
+    0: 'none',         # no significant light-evoked response
+}
+
+
+def antidromic_tier_categorization(antidromic_pivot, soma_site='surface_DRN',
+                                   opto_p_thresh=0.05, max_jitter=0.007,
+                                   max_antidromic_latency=0.025,
+                                   collision_p_thresh=0.05, verbose=False):
     """Assign a tier per (unit, projection-target site).
 
-    Returns a long DataFrame with columns ['unit_id', 'site', 'tier'].
+    Tiers are nested, strongest first (see ANTIDROMIC_TIER_LABELS):
+
+      tier 3 'responsive'  significant light-evoked response at the target site
+                           (opto_p_val < opto_p_thresh).
+      tier 2 'jitter'      tier 3 and a sharp, short-latency first-spike peak
+                           (jitter < max_jitter and 0 < latency <= max_antidromic_latency).
+      tier 1 'collision'   tier 2 and the collision test confirms it (see below).
+      tier 0 'none'        everything else.
+
+    Each tier requires the ones below it. Promotion used to be independent, so a sharp
+    first-spike peak set tier 2 even with no significant response at all (35 of the 96
+    sharp rows in the DRN dataset had opto_p_val >= 0.05, up to 1.0), ranking
+    non-responsive units above responsive ones.
+
+    The latency gate matters because jitter is the FWHM of the first-spike histogram over
+    5-100 ms with a one-bin floor, so a late spontaneous spike landing in a single bin
+    reports the sharpest jitter in the dataset (0.5 ms) at a latency of 40-100 ms. Without
+    the gate those rows reached the sharp tiers.
+
+    Collision confirmation needs both halves of collision_test: collision_pvalue (Fisher)
+    < collision_p_thresh, i.e. the antidromic spike is lost more often when an orthodromic
+    spike arrives inside the collision window, AND collision_pbinom above threshold, i.e.
+    zero antidromic-spike probability just before the boundary cannot be rejected
+    (complete collision). collision_pbinom is a binomial test against p=0, so in practice
+    it is an indicator: 1.0 when no antidromic spike survived the final window, 0.0 when
+    one did. A NaN collision result (latency undefined, or no trial with a qualifying
+    orthodromic spike) leaves the unit at tier 2 -- untested, not disconfirmed.
+
+    Parameters:
+        antidromic_pivot (pd.DataFrame): per-unit pivot from analyze_antidromic_responses,
+            with either (metric, site) MultiIndex columns or flat '<metric>_<site>' names.
+        soma_site (str): stimulation site over the soma; excluded from tiering.
+        opto_p_thresh (float): response-test alpha for tier 3.
+        max_jitter (float): first-spike FWHM ceiling, in seconds, for tier 2.
+        max_antidromic_latency (float): first-spike peak latency ceiling, in seconds, for
+            tier 2.
+        collision_p_thresh (float): alpha shared by the two collision criteria for tier 1.
+        verbose (bool): print one line per unit x site promoted to tier 2 or 1.
+
+    Returns:
+        pd.DataFrame: long frame with columns ['unit_id', 'site', 'tier', 'tier_label'].
     """
     # Flatten on a copy. Assigning to the caller's .columns renamed its columns as a side
     # effect, so the schema of the saved per-session pkl depended on whether tier_cat was
@@ -661,29 +743,43 @@ def antidromic_tier_categorization(antidromic_pivot, soma_site='surface_DRN'):
                 # so one qualifying site silently promoted every site after it.
                 tier = 0
                 opto_p_val = row.get(col, None)
-                opto_p_val_col = f'opto_p_val_{site}'
-                antidromic_latency_col = f'antidromic_latency_{site}'
-                antidromic_latency = row.get(antidromic_latency_col, None)
-                jitter_col = f'jitter_{site}'
-                jitter = row.get(jitter_col, None)
-                collision_pvalue = None
-                collision_pbinom = None
-                if pd.notnull(opto_p_val) and opto_p_val < 0.05:
-                    tier = 3                    
-                if pd.notnull(jitter) and jitter < 0.007:
-                    tier = 2
-                    collision_pvalue_col = f'collision_pvalue_{site}'
-                    collision_pbinom_col = f'collision_pbinom_{site}'
-                    collision_pvalue = row.get(collision_pvalue_col, None)
-                    collision_pbinom = row.get(collision_pbinom_col, None)
-                    print(f"Unit {unit_id} is categorized as tier {tier} for site {site} with antidromic latency: {antidromic_latency} and jitter: {jitter} and collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
-                    if pd.notnull(collision_pvalue) and collision_pvalue < 0.05 and pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
-                    # if pd.notnull(collision_pbinom) and collision_pbinom > 0.05:
-                        tier = 1                    
-                        print(f"Unit {unit_id} is categorized as tier {tier} for site {site} with antidromic latency: {antidromic_latency} and jitter: {jitter} and collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
-                categories.append({'unit_id': unit_id, 'site': site, 'tier': tier})
+                antidromic_latency = row.get(f'antidromic_latency_{site}', None)
+                jitter = row.get(f'jitter_{site}', None)
+                collision_pvalue = row.get(f'collision_pvalue_{site}', None)
+                collision_pbinom = row.get(f'collision_pbinom_{site}', None)
 
-                # print(f"Unit {unit_id} is tier {tier} for site {site}, latency: {antidromic_latency}, jitter: {jitter}, collision_pvalue: {collision_pvalue} and collision_pbinom: {collision_pbinom}")
+                responsive = pd.notnull(opto_p_val) and opto_p_val < opto_p_thresh
+                sharp = (
+                    pd.notnull(jitter) and jitter < max_jitter
+                    and pd.notnull(antidromic_latency)
+                    and 0 < antidromic_latency <= max_antidromic_latency
+                )
+                collision_confirmed = (
+                    pd.notnull(collision_pvalue) and collision_pvalue < collision_p_thresh
+                    and pd.notnull(collision_pbinom) and collision_pbinom > collision_p_thresh
+                )
+
+                # Nested: each promotion happens only inside the weaker tier it requires.
+                if responsive:
+                    tier = 3
+                    if sharp:
+                        tier = 2
+                        if collision_confirmed:
+                            tier = 1
+
+                if verbose and tier in (1, 2):
+                    print(
+                        f"Unit {unit_id} site {site}: tier {tier} ({ANTIDROMIC_TIER_LABELS[tier]}), "
+                        f"opto_p_val: {opto_p_val}, latency: {antidromic_latency}, "
+                        f"jitter: {jitter}, collision_pvalue: {collision_pvalue}, "
+                        f"collision_pbinom: {collision_pbinom}"
+                    )
+                categories.append({
+                    'unit_id': unit_id,
+                    'site': site,
+                    'tier': tier,
+                    'tier_label': ANTIDROMIC_TIER_LABELS[tier],
+                })
     return pd.DataFrame(categories)
     
 def collision_test(int_event_locked_timestamps, antidromic_latency, bin_size=10, antidromic_jitter=0.005, plot=True):
@@ -937,7 +1033,9 @@ if __name__ == "__main__":
     data_type = 'curated'  # 'raw' or 'curated'
     session_df = pd.read_csv('/root/capsule/code/data_management/session_assets.csv')
     # remove opto sessions
-    session_list = session_df[session_df['probe'] == '2']['session_id'].to_list()
+    # probe is int64 in session_assets.csv, so comparing to the string '2' matched no rows
+    # and session_list came back empty.
+    session_list = session_df[session_df['probe'].astype(str) == '2']['session_id'].to_list()
     def process(session, data_type='curated'):
         session_dir = session_dirs(session)
         print(f"Processing session: {session}")
