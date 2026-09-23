@@ -1037,13 +1037,20 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     source_nwb = ephys_nwb if ephys_nwb is not None else behavior_nwb
 
     if source_nwb is not None:
-        session_description = source_nwb.session_description
+        session_description = f"Combined data for {session_id}"
         session_start_time = source_nwb.session_start_time
         source_session_id = source_nwb.session_id if hasattr(source_nwb, 'session_id') else session_id
         logger.info(f"Using metadata from {'ephys' if ephys_nwb is not None else 'behavior'} NWB")
+        # remove .json from end of source_sessison_id if it exist
+        if source_session_id.endswith(".json"):
+            source_session_id = source_session_id[:-5]
+        # Add "behavior_" to the beginning if it doesn't already exist
+        if not source_session_id.startswith("behavior_") and not source_session_id.startswith("ecephys_")
+            source_session_id = "behavior_" + source_session_id
+                # add 'behavior_" to start of source_session_id it it doesn't start with it
     else:
         # Fallback to defaults
-        session_description = f"Combined behavior and ephys data for {session_id}"
+        session_description = f"Combined data for {session_id}"
         session_dir = session_dirs(session_id)
         session_start_time = session_dir.get('datetime')
         if session_start_time is None:
@@ -1061,12 +1068,13 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         session_start_time,
         [('ephys NWB', ephys_nwb), ('behavior NWB', behavior_nwb)],
     )
+    
     new_nwb = NWBFile(
         session_description=session_description,
         subject=subject,
         identifier=f"{session_id}_merged_{creation_time.strftime('%Y%m%d_%H%M%S')}",
         session_start_time=session_start_time,
-        session_id=source_session_id,
+        session_id=session_id, # use current session_id instead of inheriting from source nwbs
         institution='Allen Institute for Neural Dynamics',
         source_script='https://github.com/AllenNeuralDynamics/LC-beh-physiology-analysis/blob/pack/code/data_management/build_merged_nwb.py',
         source_script_file_name='build_merged_nwb.py'
