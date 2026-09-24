@@ -1045,7 +1045,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         if source_session_id.endswith(".json"):
             source_session_id = source_session_id[:-5]
         # Add "behavior_" to the beginning if it doesn't already exist
-        if not source_session_id.startswith("behavior_") and not source_session_id.startswith("ecephys_")
+        if not source_session_id.startswith("behavior_") and not source_session_id.startswith("ecephys_"):
             source_session_id = "behavior_" + source_session_id
                 # add 'behavior_" to start of source_session_id it it doesn't start with it
     else:
