@@ -201,9 +201,10 @@ def build_one(session, save_dir, log_dir, **kwargs):
 
     started = datetime.now()
     try:
-        # build_combined_nwb sets the extension from its backend, so it returns the
-        # actual path written ('..._combined.nwb' or '..._combined.nwb.zarr')
-        kwargs['save_file'] = os.path.join(save_dir, f"{session}_combined.nwb")
+        # build_combined_nwb names the file itself (from the session and the modalities
+        # it found) and sets the extension from its backend, so it returns the actual
+        # path written
+        kwargs['save_dir'] = save_dir
         logging.info(f"Building {session}: {kwargs}")
         nwb_path, _, modalities = build_combined_nwb(session, **kwargs)
         # flatten: each key in modalities becomes its own column

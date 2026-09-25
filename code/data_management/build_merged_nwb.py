@@ -138,6 +138,16 @@ REQUIRED_MODALITIES = (
 )
 NO_VALID_DATA = 'no valid data'
 
+# Modalities that go into the file name, mapped to the label they get there. Only these
+# three are named: they are the acquisition modalities the file is filed under, while the
+# rest (pupil, tongue movements, ...) are derived from them. Order matters - the labels
+# are joined with '+' in this order (see nwb_file_name).
+FILE_NAME_MODALITIES = (
+    ('behavior_trials', 'behavior'),
+    ('ephys_units', 'ecephys'),
+    ('FP', 'fib'),
+)
+
 # Backends build_combined_nwb can write, mapped to the extension each one needs:
 # hdf5 writes a single file, zarr writes a directory store.
 NWB_BACKENDS = {
@@ -170,6 +180,33 @@ def nwb_save_path(save_file, backend='zarr'):
         if stem.endswith(extension):
             stem = stem[:-len(extension)]
     return stem + NWB_BACKENDS[backend][0]
+
+
+def nwb_file_name(session_id, data_modalities, backend='zarr'):
+    """
+    Name a combined NWB from the session and the modalities it ended up with.
+
+    The name is 'sub-<animal_id>_ses-<modalities>-<raw_id>' plus the backend's
+    extension, with the underscores of raw_id turned into dashes so that '_' stays the
+    separator between the name's own fields. <modalities> is the '+'-joined labels of
+    the modalities in the file (see FILE_NAME_MODALITIES); if the file has none of them
+    the '<modalities>-' part is dropped.
+
+    Args:
+        session_id: Session identifier, e.g. 'behavior_669492_2023-06-26_19-14-31'
+        data_modalities: the modalities dict build_combined_nwb fills in
+        backend: 'hdf5' or 'zarr', which decides the extension
+
+    Returns:
+        The file name, e.g.
+        'sub-669492_ses-behavior+ecephys-669492-2023-06-26-19-14-31.nwb.zarr'
+    """
+    animal_id, _, raw_id = parseSessionID(session_id)
+    if animal_id is None or raw_id is None:
+        raise ValueError(f"Cannot build a file name from unparseable session ID '{session_id}'")
+    labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
+    session_label = '-'.join(filter(None, ['+'.join(labels), raw_id.replace('_', '-')]))
+    return nwb_save_path(f"sub-{animal_id}_ses-{session_label}", backend)
 
 
 def load_intermediate_data(session_dir: Path) -> dict:
@@ -383,7 +420,7 @@ def build_subject(session_id, session_start_time, source_nwbs):
                 fields[field] = value
                 inherited_from[field] = label
 
-    animal_id, _, _ = parseSessionID(session_id)
+    animal_id, _, raw_id = parseSessionID(session_id)
     if fields['subject_id'] is None:
         logger.warning(f"No subject_id in any source, using the animal ID from {session_id}")
         fields['subject_id'] = animal_id
@@ -922,7 +959,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         return merged_df
 
 
-def build_combined_nwb(session_id, data_type='curated', save_file=None, add_metadata=False,
+def build_combined_nwb(session_id, data_type='curated', save_dir=None, add_metadata=False,
                        backend='zarr'):
     """
     Build a complete NWB file with available data modalities.
@@ -940,17 +977,18 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         data_type: 'curated' or 'raw'. 'curated' falls back to 'raw' when no
             curated unit table exists (the version used is reported as
             'ephys_version' in the returned modalities dict)
-        save_file: Path to save NWB file (if None, returns in-memory only). The
-            extension is set from `backend`, so it can be passed without one
+        save_dir: Directory to save the NWB into (if None, returns in-memory only).
+            The file name is built from the session and the modalities the file ended
+            up with, see nwb_file_name
         add_metadata: If True, bundle the raw AIND metadata JSON files into a
             LabMetaData container (see add_aind_metadata). Placeholder metadata,
             expected to be replaced by properly typed metadata later.
-        backend: 'zarr' to write a '<save_file>.nwb.zarr' directory store, or 'hdf5'
-            to write a single '<save_file>.nwb' file (see nwb_save_path)
+        backend: 'zarr' to write a '<name>.nwb.zarr' directory store, or 'hdf5'
+            to write a single '<name>.nwb' file (see nwb_save_path)
 
     Returns:
         Tuple of (save_path, nwb_object, data_modalities_dict)
-        save_path is the written file or store path, None if save_file was None, or the
+        save_path is the written file or store path, None if save_dir was None, or the
         string NO_VALID_DATA ('no valid data') if none of REQUIRED_MODALITIES were
         found - in that case nothing is written and 'nwb_saved' stays None.
         data_modalities_dict has keys:
@@ -970,10 +1008,13 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     """
     logger.info(f"Building combined NWB for {session_id}")
 
-    # Checked up front: the backend is only used at the very end, and a typo should not
-    # cost a whole build before it is reported
+    # Checked up front: both only matter at the very end, where the file is named and
+    # written, and neither a bad backend nor an unnameable session should cost a whole
+    # build before it is reported
     if backend not in NWB_BACKENDS:
         raise ValueError(f"Unknown NWB backend '{backend}', expected one of {sorted(NWB_BACKENDS)}")
+    if save_dir is not None:
+        nwb_file_name(session_id, {}, backend)
 
     # Track which data modalities are included
     data_modalities = {
@@ -989,7 +1030,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         'beh_version': 'none',  # 'raw', 'processed', or 'none'
         'ephys_version': 'none',  # unit table version actually used: 'curated', 'raw', or 'none'
         'nwb_created': None,  # Timestamp when NWB object was created
-        'nwb_saved': None,  # Timestamp when NWB file was saved (if save_file provided)
+        'nwb_saved': None,  # Timestamp when NWB file was saved (if save_dir provided)
     }
 
     # 1. Merge unit tables (optional - may not exist for all sessions)
@@ -1068,13 +1109,13 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         session_start_time,
         [('ephys NWB', ephys_nwb), ('behavior NWB', behavior_nwb)],
     )
-    
+    animal_id, _, raw_id = parseSessionID(session_id)
     new_nwb = NWBFile(
         session_description=session_description,
         subject=subject,
         identifier=f"{session_id}_merged_{creation_time.strftime('%Y%m%d_%H%M%S')}",
         session_start_time=session_start_time,
-        session_id=session_id, # use current session_id instead of inheriting from source nwbs
+        session_id=raw_id, # use current session_id instead of inheriting from source nwbs
         institution='Allen Institute for Neural Dynamics',
         source_script='https://github.com/AllenNeuralDynamics/LC-beh-physiology-analysis/blob/pack/code/data_management/build_merged_nwb.py',
         source_script_file_name='build_merged_nwb.py'
@@ -1328,12 +1369,13 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         )
         return NO_VALID_DATA, new_nwb, data_modalities
 
-    # 10. Save if requested, with the extension the chosen backend needs ('.nwb' for
+    # 10. Save if requested, under a name built from the session and the modalities that
+    # made it into the file, with the extension the chosen backend needs ('.nwb' for
     # hdf5, '.nwb.zarr' for the zarr directory store)
-    if save_file is not None:
-        save_file = nwb_save_path(save_file, backend)
+    if save_dir is not None:
+        save_file = os.path.join(save_dir, nwb_file_name(session_id, data_modalities, backend))
         io_class = NWB_BACKENDS[backend][1]
-        os.makedirs(os.path.dirname(save_file), exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
         # mode='w' overwrites, but only in kind: a zarr store has to be a directory and
         # an hdf5 file a regular file, so drop whatever is at the path if it is neither.
         if backend == 'zarr' and os.path.exists(save_file) and not os.path.isdir(save_file):
@@ -1350,6 +1392,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         data_modalities['nwb_saved'] = save_time.isoformat()
         logger.info(f"Saved combined NWB ({backend}) to {save_file}")
     else:
+        save_file = None
         logger.info("Generated NWB in memory only (no file written)")
 
     return save_file, new_nwb, data_modalities
@@ -1378,7 +1421,7 @@ if __name__ == '__main__':
 
 
         # Test the full build_combined_nwb function
-        save_path, nwb, modalities = build_combined_nwb(session, data_type='curated', save_file=None)
+        save_path, nwb, modalities = build_combined_nwb(session, data_type='curated', save_dir=None)
         if nwb is not None:
             print(f"\n✓ Success! Combined NWB created")
             print(f"  Subject: " + ', '.join(
