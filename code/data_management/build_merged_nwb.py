@@ -203,7 +203,7 @@ def nwb_file_name(session_id, data_modalities, backend='zarr'):
     animal_id, _, raw_id = parseSessionID(session_id)
     if animal_id is None or raw_id is None:
         raise ValueError(f"Cannot build a file name from unparseable session ID '{session_id}'")
-    # labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
+    labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
     # session_label = '-'.join(filter(None, ['+'.join(labels), raw_id.replace('_', '-')]))
     session_label = '-'.join(filter(None, [raw_id.replace('_', '-'), '+'.join(labels)]))
     return nwb_save_path(f"sub-{animal_id}_ses-{session_label}", backend)
@@ -231,7 +231,7 @@ def nwb_file_name(session_id, data_modalities, backend='zarr'):
     animal_id, _, raw_id = parseSessionID(session_id)
     if animal_id is None or raw_id is None:
         raise ValueError(f"Cannot build a file name from unparseable session ID '{session_id}'")
-    # labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
+    labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
     # session_label = '-'.join(filter(None, ['+'.join(labels), raw_id.replace('_', '-')]))
     session_label = '-'.join(filter(None, [raw_id.replace('_', '-'), '+'.join(labels)]))
     return nwb_save_path(f"sub-{animal_id}_ses-{session_label}", backend)
