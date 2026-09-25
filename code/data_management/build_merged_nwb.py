@@ -205,7 +205,7 @@ def nwb_file_name(session_id, data_modalities, backend='zarr'):
         raise ValueError(f"Cannot build a file name from unparseable session ID '{session_id}'")
     labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
     # session_label = '-'.join(filter(None, ['+'.join(labels), raw_id.replace('_', '-')]))
-    session_label = '-'.join(filter(None, [raw_id.replace('_', '-'), '+'.join(labels)]))
+    session_label = '_'.join(filter(None, [raw_id.replace('_', '-'), '+'.join(labels)]))
     return nwb_save_path(f"sub-{animal_id}_ses-{session_label}", backend)
 
 
