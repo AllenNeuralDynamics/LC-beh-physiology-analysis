@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -)",
+      "Bash(python -c ' *)",
+      "Read(//root/.claude/projects/-root-capsule/memory/**)",
+      "Read(//tmp/**)",
+      "Bash(ls /root/capsule/scratch/combined/combine_unit_tbl/ /root/capsule/scratch/combined/master_unit_tables/ 2>/dev/null | head -20)",
+      "Read(//scratch/combined/combine_unit_tbl/**)",
+      "Bash(timeout 400 python -c ' *)",
+      "Bash(timeout 590 python persistence_5HT_analysis.py)",
+      "Bash(timeout 500 python -c ' *)",
+      "Bash(python persistence_figures.py)",
+      "Bash(python persistence_lick_control.py)",
+      "Bash(python reward_rate_tonic_analysis.py)",
+      "Bash(python reward_rate_figures.py)",
+      "Bash(timeout 110 bash -c \"ls -d /root/capsule/scratch/*/behavior_*/ephys/opto/raw 2>/dev/null | head -3; find /root/capsule/scratch -maxdepth 6 -name '*_opto_drift_tbl.csv' 2>/dev/null | wc -l\")",
+      "Bash(timeout 110 find /root/capsule/scratch -maxdepth 7 -name '*_opto_drift_tbl.csv' 2>/dev/null | head -5; echo \"---\"; timeout 110 find /root/capsule/scratch -maxdepth 7 -name '*_opto_drift_tbl.csv' 2>/dev/null | wc -l)",
+      "Read(//scratch/**)",
+      "Bash(timeout 110 ls /root/capsule/scratch/791174/behavior_791174_2025-09-05_14-06-53/ephys/opto/raw/)",
+      "Bash(timeout 590 python -c ' *)",
+      "Bash(python impact_checks.py)",
+      "Bash(timeout 300 python -c ' *)",
+      "Bash(ls /root/capsule/results/ 2>&1 | head -20; echo \"=== opto_session csv files anywhere in data:\"; find /root/capsule/data -maxdepth 4 -name \"*opto_session*.csv\" 2>/dev/null | head -10)",
+      "Read(//results/**)",
+      "Bash(timeout 550 python -c ' *)",
+      "Bash(timeout 580 python -c ' *)",
+      "Bash(git show *)",
+      "Bash(python tau_heterogeneity_figures.py)",
+      "Bash(python -c \"import aind_ephys_utils.align as a; print\\(a.__file__\\)\")",
+      "Bash(ls /root/capsule/data/merfish_data/adata 2>/dev/null | head; echo \"---retro\"; ls -la /root/capsule/scratch/combined/retro_ccf/ 2>/dev/null | head; echo \"---LC meshes\"; ls /root/capsule/data/LC_percentile_meshes/ 2>/dev/null | head)",
+      "Read(//root/capsule/scratch/combined/**)"
+    ]
+  }
+}
