@@ -52,11 +52,36 @@ import time
 import shutil 
 from aind_ephys_utils import align
 
+def save_fig(fig, path_no_ext, save_format='pdf', **kwargs):
+    """Save fig as .pdf, .svg or both.
+
+    save_format: 'pdf', 'svg' or 'both'.
+    SVGs are written with fully vector output and text kept as text
+    (matplotlib's equivalent of MATLAB's renderer='Painters'), so they stay
+    editable in Illustrator/Inkscape.
+    """
+    if save_format == 'both':
+        formats = ['pdf', 'svg']
+    elif save_format in ('pdf', 'svg'):
+        formats = [save_format]
+    else:
+        raise ValueError(f"save_format must be 'pdf', 'svg' or 'both', got {save_format!r}")
+
+    for ext in formats:
+        fname = f'{path_no_ext}.{ext}'
+        if ext == 'svg':
+            # 'none' keeps glyphs as text; no rasterized layers in the output
+            with plt.rc_context({'svg.fonttype': 'none', 'svg.image_inline': True}):
+                fig.savefig(fname, format='svg', **kwargs)
+        else:
+            fig.savefig(fname, format='pdf', **kwargs)
+
+
 def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', curate_time=True, opto_only=True,
-                        model_name = None, 
+                        model_name = None,
                         formula = 'spikes ~ 1 + outcome + choice + Qchosen',
                         pre_event=-1, post_event=3, binSize=0.2, stepSize=0.05,
-                        units  = None):
+                        units  = None, save_format = 'both'):
     # %%
     # load behavior data
     session_dir = session_dirs(session, model_name = model_name) 
@@ -438,10 +463,10 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
     #     time.sleep(1)
 
     def process(unit_id):
-        fig = plot_unit(unit_id) 
-        if fig is not None: 
-            fig.savefig(fname=os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], align_name, f'unit_{unit_id}_{align_name}.pdf')) 
-            fig.savefig(fname=os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], align_name, f'unit_{unit_id}_{align_name}.svg'))
+        fig = plot_unit(unit_id)
+        if fig is not None:
+            save_fig(fig, os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], align_name, f'unit_{unit_id}_{align_name}'),
+                     save_format=save_format)
         plt.close(fig)
         time.sleep(1)
 
@@ -465,13 +490,13 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
 
     output_pdf = os.path.join(session_dirs(session)[f'ephys_dir_{data_type}'],f'{session}_unit_beh_{align_name}.pdf')
 
-    if os.path.exists(pdf_dir):
+    if os.path.exists(pdf_dir) and save_format != 'svg':
         print(f'Combining {session}')
         combine_pdf_big(pdf_dir, output_pdf)
     
     plt.close('all')
 
-def burst_analysis(session, data_type, units = None):
+def burst_analysis(session, data_type, units = None, save_format = 'pdf'):
     print(f'Processing session {session} for data type {data_type}')
     unit_tbl = get_unit_tbl(session, data_type)
     session_df = get_session_tbl(session)
@@ -706,17 +731,19 @@ def burst_analysis(session, data_type, units = None):
 
         plt.suptitle(f'Session {session}, Unit {unit_id}')
         plt.tight_layout()
-        fig.savefig(os.path.join(save_path, f'opto_{session}{unit_id}_burst_selected.pdf'), dpi=300)
+        save_fig(fig, os.path.join(save_path, f'opto_{session}{unit_id}_burst_selected'),
+                 save_format=save_format, dpi=300)
         plt.close(fig)
 
-    print(f'{session} Combining PDFs...')
-    combine_pdf_big(save_path, os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], f'{session}_bursting.pdf'))
+    if save_format != 'svg':
+        print(f'{session} Combining PDFs...')
+        combine_pdf_big(save_path, os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], f'{session}_bursting.pdf'))
     print(f'{session} Done!')
 
 
 
 
-def plot_alignments(session, data_type='curated', unit_ids=None, win_len = 0.5):
+def plot_alignments(session, data_type='curated', unit_ids=None, win_len = 0.5, save_format = 'pdf'):
     bin_len = 0.01
     time_constant = 100
     time_window = [-1, 1.5]
@@ -966,7 +993,7 @@ def plot_alignments(session, data_type='curated', unit_ids=None, win_len = 0.5):
         fig.suptitle(f'Session: {session}, Unit: {unit_id}', fontsize=16)
         target_folder = os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], 'go_cue_vs_response')
         os.makedirs(target_folder, exist_ok=True)
-        fig.savefig(os.path.join(target_folder, f'{unit_id}_alignments.pdf'))
+        save_fig(fig, os.path.join(target_folder, f'{unit_id}_alignments'), save_format=save_format)
 
     # if len(unit_ids) > 0:
     #     combine_pdf_big(target_folder, os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], f'alignments_compare_combined.pdf'))

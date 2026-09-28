@@ -1,3 +1,10 @@
+"""Sync the capsule `scratch/` tree to S3.
+
+For bulk transfers, drive the AWS CLI directly instead -- install steps, tuned
+`aws configure` settings, the flags to avoid and measured throughput are in the
+sibling `s3_sync.md`.
+"""
+
 import os, sys
 # Resolve code/beh_ephys_analysis (the folder containing `utils`) relative to this
 # file's location, so imports work no matter where the repo is checked out.
@@ -55,10 +62,25 @@ def sync_directory(local_dir, destination, if_copy=False, if_dry_run=True, if_de
             )
         output = result.stdout + result.stderr
 
-        # Check output: if "upload:" appears, files were sent;
-        # otherwise, assume that nothing needed uploading.
-        if "upload:" in output:
-            logger.info(f"Uploaded {local_dir} to {destination}!")
+        # A non-zero exit has to be reported, or a failed sync falls through to
+        # the "nothing needed uploading" branch below and looks like success.
+        if result.returncode != 0:
+            logger.error(output)
+            return f"error during sync (aws exit {result.returncode})"
+
+        # Real transfers print lines starting with "upload:", but --dryrun prefixes
+        # them with "(dryrun) ", so a bare `"upload:" in output` substring test
+        # claims an upload that never happened. Match at line start instead.
+        lines = output.splitlines()
+        uploaded = [line for line in lines if line.startswith("upload:")]
+        would_upload = [line for line in lines if line.startswith("(dryrun)")]
+
+        if if_dry_run:
+            logger.info(output)
+            logger.info(f"Dry run: {len(would_upload)} file(s) would upload from {local_dir}.")
+            return f"dry run, {len(would_upload)} file(s) would upload"
+        elif uploaded:
+            logger.info(f"Uploaded {len(uploaded)} file(s) from {local_dir} to {destination}!")
             return "successfully uploaded"
         else:
             logger.info(output)
@@ -70,6 +92,10 @@ def sync_directory(local_dir, destination, if_copy=False, if_dry_run=True, if_de
 
 # %%
 if __name__ == "__main__":
+    # Must run before any logger call, or the root logger's WARNING default
+    # silently drops every logger.info below and a long run leaves no record.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     s3_bucket_dest = "s3://aind-scratch-data/jason_lee/DRN_beh_physiology/"
     local_dir = CAPSULE_ROOT + "/scratch/"
     combine_only = False
