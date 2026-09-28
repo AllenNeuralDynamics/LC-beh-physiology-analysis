@@ -152,6 +152,8 @@
     "sliding_rp_violation": "sliding_rp_violation",
     "rp_contamination": "rp_contamination",
     "isi_violations_count": "isi_violations_count",
+    "isi_violations_ratio": "isi_violations_ratio",
+    "amplitude": "amplitude",
     "num_positive_peaks": "num_positive_peaks",
     "sync_spike_4": "sync_spike_4",
     "exp_decay": "exp_decay",
@@ -172,6 +174,10 @@
     "drift_ptp": "drift_ptp",
     "nn_hit_rate": "nn_hit_rate",
     "peak_to_valley": "peak_to_valley",
-    "amplitude_cv_median": "amplitude_cv_median"
+    "amplitude_cv_median": "amplitude_cv_median",
+    "extremum_channel_index": "extremum_channel_index",
+    "is_merged": "is_merged",
+    "SUA": "SUA",
+    "noise": "noise"
   }
 }
