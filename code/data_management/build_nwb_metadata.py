@@ -1,3 +1,4 @@
+from glob import glob
 from tornado.web import url
 from dask.dot import name
 from datetime import datetime, timezone
@@ -56,7 +57,7 @@ session_assets['animal_id'] = session_assets['session_id'].apply(lambda x: x.spl
 session_processing_check = pd.DataFrame(index=list(session_assets["session_id"]) + [f"{x}_combined" for x in session_assets["animal_id"].unique()],
  columns=list(session_meta["name"])+list(glm_meta["name"]), data=False)
 
-client = CodeOcean(domain="https://codeocean.allenneuraldynamics.org", token=os.getenv("API_SECRET"))
+client = CodeOcean(domain="https://codeocean.allenneuraldynamics.org", token=os.getenv("API_SECRET"), retries=3)
 
 def create_session_meta(session_id):
     # prepare data asset names
@@ -155,7 +156,10 @@ def write_session_metadata(session_id, include_tongue=True, include_keypoint=Tru
     p, session_data_assets = create_session_meta(session_id)
     source_names = list(session_data_assets.values())
 
-    session_id_new = session_data_assets["raw_data"]
+    session_id_new = session_data_assets.get("raw_data")
+    if not session_id_new:
+        print(f"No raw_data asset found for session {session_id}. Skipping.")
+        return None
     tongue_movements = get_processing_subset(session_id_new, TONGUE_MOVEMENT_DATA_DIR)
     if tongue_movements and include_tongue:
         p += tongue_movements
@@ -169,53 +173,64 @@ def write_session_metadata(session_id, include_tongue=True, include_keypoint=Tru
 
     if 'sorted_curated' in session_data_assets:
         base_asset_name = session_data_assets['sorted_curated']
+        suffix = "_sorted_curated"
     else:
         base_asset_name = session_data_assets['raw_data']
+        suffix = "_raw_data"
 
     # v2 metadata from query
-    base_json = docdb_api_client.retrieve_docdb_records(
-        filter_query=dict(name=base_asset_name),
-    )[0]
     try:
-        base_md = Metadata.model_validate(base_json)
-    except Exception as e:
-        base_json = docdb_api_client_v1.retrieve_docdb_records(
+        base_json = docdb_api_client.retrieve_docdb_records(
             filter_query=dict(name=base_asset_name),
         )[0]
+        base_md = Metadata.model_validate(base_json)
+    except Exception as e:
+        # base_json = docdb_api_client_v1.retrieve_docdb_records(
+        #     filter_query=dict(name=base_asset_name),
+        # )[0]
+        json_files = [Path(file) for file in glob(f"/data/{session_id}{suffix}/*.json") if not "nd.json" in file]
+        base_json = {file.stem: json.loads(file.read_text()) for file in json_files}
+        base_json["name"] = base_json["data_description"]["name"]
+        base_json["location"] = "temp"
         base_md = Upgrade(base_json).metadata
-
-    # Create the derived metadata -- this applies all four inheritance rules
-    # derived = Metadata.from_metadata(
-    #     base_md,
-    #     process_name="packaged_nwb",
-    #     # isn't used and shouldn't be needed but may require a placeholder
-    #     location="s3://my-bucket/derived-asset",
-    #     new_processing=p,
-    # )
-    
-    procedures_empty = Procedures(
-        subject_id=base_md.procedures.subject_id,
-    ).model_dump()
 
     process_name = "nwb-complete"
     derived_dd = derive_data_description(   
                 base_md.data_description,
                 process_name=process_name,
                 source_data=source_names,
+    )
+    try:
+        derived = Metadata(
+                name=derived_dd.name,
+                location=f"s3://aind-open-data/{derived_dd.name}",
+                data_description=derived_dd,
+                subject=base_md.subject,
+                procedures=base_md.procedures,
+                instrument=base_md.instrument,
+                acquisition=base_md.acquisition,
+                processing=base_md.processing + p if base_md.processing else p,
+                quality_control=base_md.quality_control,
+            )
+    
+
+    except Exception as e:
+        procedures_empty = Procedures(
+            subject_id=base_md.procedures.subject_id,
         )
-    derived = Metadata(
-            name=derived_dd.name,
-            location=f"s3://aind-open-data/{derived_dd.name}",
-            data_description=derived_dd,
-            subject=base_md.subject,
-            procedures=procedures_empty,
-            instrument=base_md.instrument,
-            acquisition=base_md.acquisition,
-            processing=base_md.processing + p if base_md.processing else p,
-            quality_control=base_md.quality_control,
-        )
-    # fill invalid procedures
-    derived.procedures = base_md.procedures
+        derived = Metadata(
+                name=derived_dd.name,
+                location=f"s3://aind-open-data/{derived_dd.name}",
+                data_description=derived_dd,
+                subject=base_md.subject,
+                procedures=procedures_empty,
+                instrument=base_md.instrument,
+                acquisition=base_md.acquisition,
+                processing=base_md.processing + p if base_md.processing else p,
+                quality_control=base_md.quality_control,
+            )
+        # fill invalid procedures
+        derived.procedures = base_md.procedures
     return derived
 
 if __name__ == "__main__":

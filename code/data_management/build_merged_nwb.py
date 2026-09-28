@@ -12,6 +12,7 @@ import glob
 import json
 import logging
 import os
+import re
 import tempfile
 import pandas as pd
 import numpy as np
@@ -19,7 +20,7 @@ from datetime import datetime
 from uuid import uuid4
 from dateutil.tz import tzlocal
 from hdmf.spec import DatasetSpec, GroupSpec, NamespaceBuilder
-from pynwb import NWBFile, TimeSeries, get_class, load_namespaces
+from pynwb import NWBFile, NWBHDF5IO, TimeSeries, get_class, load_namespaces
 from hdmf_zarr import NWBZarrIO
 from pynwb.file import Subject
 
@@ -30,7 +31,7 @@ from utils.beh_functions import get_session_tbl, get_unit_tbl, session_dirs, par
 from utils.pupil_utils import load_pupil
 from pathlib import Path
 from hdmf.common import DynamicTable, VectorData
-from .build_nwb_metadata import write_session_metadata
+from data_management.build_nwb_metadata import write_session_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,14 @@ logger = logging.getLogger(__name__)
 TONGUE_MOVEMENT_DATA_DIR = Path('/root/capsule/data/all_tongue_movements')
 TONGUE_MOVEMENT_PARQUET = TONGUE_MOVEMENT_DATA_DIR / 'all_tongue_movements_04022026.parquet'
 KEYPOINT_TRACKING_DIR = Path('/root/capsule/data/keypoint_tracking_bottomview_LCrecordings')
+
+# Spike times must reach the NWB in seconds. A sorter that leaves them as sample
+# indices is caught by the span, not the magnitude: seconds here carry a large
+# absolute-clock offset (the earliest spike is often 1e6-1.7e7), so only the
+# max-to-min distance separates the two. Real sessions span 1.6e3-7.0e3 s; an hour of
+# sample indices at 30 kHz spans ~1.1e8. See spike_times_are_samples.
+MAX_PLAUSIBLE_SESSION_SECONDS = 86400  # 24 h, far above any observed session
+NOMINAL_SAMPLING_RATE = 30000  # only to report what the span would be as seconds
 
 # AIND metadata extension: the raw metadata JSON files are bundled as a single JSON
 # blob in a LabMetaData container. Placeholder for now — expected to be replaced by
@@ -47,6 +56,29 @@ AIND_NAMESPACE_VERSION = '0.1.0'
 AIND_NEURODATA_TYPE = 'AindMetadata'
 AIND_LAB_META_DATA_KEY = 'aind_metadata'
 
+# Subject metadata. The NWB Subject is inherited from the source NWBs field by field
+# (see build_subject), falling back to the AIND subject.json in the session's raw asset —
+# the ephys NWBs of the older Neuralynx sessions carry a subject_id and nothing else.
+
+SUBJECT_JSON_NAME = 'subject.json'
+# The pynwb Subject fields this inherits, in the order they are logged. Everything Subject
+# takes except age__reference, which no source carries and pynwb defaults to 'birth', and
+# weight: the sources record a bare number whose unit is ambiguous (nwbinspector rejects
+# '0.0257'), and some carry a NaN, so it is left out rather than written wrong.
+SUBJECT_FIELDS = ('subject_id', 'species', 'strain', 'sex', 'date_of_birth', 'age',
+                  'genotype', 'description')
+# NWB writes sex as a single-letter code, AIND metadata spells it out
+SEX_CODES = {'m': 'M', 'male': 'M', 'f': 'F', 'female': 'F', 'u': 'U', 'unknown': 'U',
+             'o': 'O', 'other': 'O'}
+SEX_UNKNOWN = 'U'
+# Descriptions saying nothing subject_id does not already say, e.g. 'Animal name:754897'
+UNINFORMATIVE_SUBJECT_DESCRIPTION = re.compile(r'^\s*animal\s*name\s*:', re.IGNORECASE)
+# ISO 8601 duration, the format NWB wants for Subject.age. The curated ephys NWBs carry
+# a stringified timedelta instead ('P237 days, 11:30:09D'), which this rejects.
+ISO8601_DURATION = re.compile(
+    r'^P(?!$)(\d+(?:\.\d+)?Y)?(\d+(?:\.\d+)?M)?(\d+(?:\.\d+)?W)?(\d+(?:\.\d+)?D)?'
+    r'(T(?=\d)(\d+(?:\.\d+)?H)?(\d+(?:\.\d+)?M)?(\d+(?:\.\d+)?S)?)?$'
+)
 # Load column mappings and descriptions
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
 COLUMN_DESC_PATH = '/root/capsule/code/data_management/column_names_description.json'
@@ -55,6 +87,26 @@ COLUMN_DESC_PATH = '/root/capsule/code/data_management/column_names_description.
 # label photometry acquisitions by brain region instead of channel index.
 FP_METADATA_DIR = '/root/capsule/code/data_management/FP_metadata'
 PHOTOMETRY_SIGNALS = ('G', 'Iso', 'G-Iso')
+# Signals left out of the merged NWB entirely; drop from here to start packing one again.
+PHOTOMETRY_SIGNALS_SKIPPED = ('G-Iso',)
+
+# Vocabulary for the photometry channel descriptions written by
+# rename_photometry_acquisition(), one entry per token of the acquisition name
+# '{signal}_{region}-{hemisphere}[_{detrending method}][_mc]'.
+PHOTOMETRY_SIGNAL_DESCRIPTIONS = {
+    'G': 'Green (470 nm excitation) fluorescence',
+    'Iso': 'Isosbestic (415 nm excitation) control fluorescence',
+    'G-Iso': "Green fluorescence referenced to the isosbestic control ('G-Iso' channel "
+             "from the upstream FIP preprocessing)",
+}
+PHOTOMETRY_DETRENDING_DESCRIPTIONS = {
+    'exp': "detrended with the 'exp' method (two exponential curves fitted to the baseline)",
+    'tri-exp': "detrended with the 'tri-exp' method (three exponential curves fitted to the baseline)",
+    'bright': "detrended with the 'bright' method (biphasic exponential bleaching baseline "
+              "scaled by a saturating exponential brightening term)",
+}
+PHOTOMETRY_MOTION_CORRECTION_DESCRIPTION = 'motion corrected using the isosbestic channel'
+HEMISPHERE_NAMES = {'L': 'left', 'R': 'right'}
 
 with open(COLUMN_MAP_PATH, 'r') as f:
     COLUMN_MAP = json.load(f)
@@ -72,6 +124,92 @@ KNOWN_ARRAY_COLUMNS = {
     'waveform_on_peak_channel_of_raw_waveform', 'waveform_on_peak_channel_of_aligned_raw_waveform',
     'peak_waveform_fake_raw', 'peak_waveform_aligned_fake_raw',
 }
+
+# Modalities that make a session worth writing. If none of them are present the NWB
+# would carry nothing but session metadata, so build_combined_nwb skips saving and
+# reports NO_VALID_DATA as the path instead.
+REQUIRED_MODALITIES = (
+    'behavior_trials',
+    'ephys_units',
+    'FP',
+    'pupil',
+    'tongue_movements',
+    'keypoint_tracking',
+)
+NO_VALID_DATA = 'no valid data'
+
+# Modalities that go into the file name, mapped to the label they get there. Only these
+# three are named: they are the acquisition modalities the file is filed under, while the
+# rest (pupil, tongue movements, ...) are derived from them. Order matters - the labels
+# are joined with '+' in this order (see nwb_file_name).
+FILE_NAME_MODALITIES = (
+    ('behavior_trials', 'behavior'),
+    ('ephys_units', 'ecephys'),
+    ('FP', 'fib'),
+)
+
+# Backends build_combined_nwb can write, mapped to the extension each one needs:
+# hdf5 writes a single file, zarr writes a directory store.
+NWB_BACKENDS = {
+    'hdf5': ('.nwb', NWBHDF5IO),
+    'zarr': ('.nwb.zarr', NWBZarrIO),
+}
+
+
+def nwb_save_path(save_file, backend='zarr'):
+    """
+    Give a save path the extension its backend needs.
+
+    The two backends must not share a path: hdf5 writes a regular file and zarr a
+    directory store, so '<name>.nwb' is reserved for hdf5 and '<name>.nwb.zarr' for
+    zarr. Any existing .nwb / .nwb.zarr extension on the input is replaced, so a
+    caller can pass the same path for either backend.
+
+    Args:
+        save_file: path to save to, with or without an extension
+        backend: 'hdf5' or 'zarr'
+
+    Returns:
+        The path with the backend's extension, e.g.
+        nwb_save_path('nwb/s_combined.nwb', 'zarr') -> 'nwb/s_combined.nwb.zarr'
+    """
+    if backend not in NWB_BACKENDS:
+        raise ValueError(f"Unknown NWB backend '{backend}', expected one of {sorted(NWB_BACKENDS)}")
+    stem = str(save_file)
+    for extension in ('.zarr', '.nwb'):  # in this order, so '.nwb.zarr' comes off whole
+        if stem.endswith(extension):
+            stem = stem[:-len(extension)]
+    return stem + NWB_BACKENDS[backend][0]
+
+
+def nwb_file_name(session_id, data_modalities, backend='zarr'):
+    """
+    Name a combined NWB from the session and the modalities it ended up with.
+
+    The name is 'sub-<animal_id>_ses-<modalities>-<raw_id>' plus the backend's
+    extension, with the underscores of raw_id turned into dashes so that '_' stays the
+    separator between the name's own fields. <modalities> is the '+'-joined labels of
+    the modalities in the file (see FILE_NAME_MODALITIES); if the file has none of them
+    the '<modalities>-' part is dropped.
+
+    Args:
+        session_id: Session identifier, e.g. 'behavior_669492_2023-06-26_19-14-31'
+        data_modalities: the modalities dict build_combined_nwb fills in
+        backend: 'hdf5' or 'zarr', which decides the extension
+
+    Returns:
+        The file name
+    """
+    animal_id, _, raw_id = parseSessionID(session_id)
+    if animal_id is None or raw_id is None:
+        raise ValueError(f"Cannot build a file name from unparseable session ID '{session_id}'")
+    labels = [label for key, label in FILE_NAME_MODALITIES if data_modalities.get(key)]
+    # session_label = '-'.join(filter(None, ['+'.join(labels), raw_id.replace('_', '-')]))
+    session_label = '_'.join(filter(None, [raw_id.replace('_', '-'), '+'.join(labels)]))
+    return nwb_save_path(f"sub-{animal_id}_ses-{session_label}", backend)
+
+
+
 def load_intermediate_data(session_dir: Path) -> dict:
     """Load the four intermediate parquet tables for a session."""
     idir = session_dir / "intermediate_data"
@@ -133,6 +271,181 @@ def add_aind_metadata(nwb_file, meta_dict):
     return nwb_file
 
 
+def _subject_value(value):
+    """Normalise a subject field to None when it carries nothing, so a later source fills it."""
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def _named(value):
+    """Take the name out of an AIND metadata term ({'name': 'Mus musculus', ...} or a string)."""
+    if isinstance(value, dict):
+        return _subject_value(value.get('name'))
+    return _subject_value(value)
+
+
+def _subject_fields_from_nwb(nwb):
+    """Read the SUBJECT_FIELDS off a source NWB's Subject, {} when it has none."""
+    subject = getattr(nwb, 'subject', None) if nwb is not None else None
+    if subject is None:
+        return {}
+    return {field: _subject_value(getattr(subject, field, None)) for field in SUBJECT_FIELDS}
+
+
+def _subject_fields_from_json(session_id):
+    """
+    Read the subject fields out of the AIND subject.json in the session's raw asset.
+
+    Two aind-data-schema layouts are in circulation, and both turn up across these
+    sessions: v1 keeps the subject fields at the top level, v2 nests them under
+    'subject_details'. Only the fields NWB's Subject has a slot for are taken; the rest
+    (registries, breeding info, housing) stays in the AIND metadata blob, see
+    add_aind_metadata. Age is not in this file at all - it is computed from the date of
+    birth by _subject_age. Weight is deliberately not inherited at all, see SUBJECT_FIELDS.
+
+    Args:
+        session_id: Session identifier
+
+    Returns:
+        dict of subject field -> value, empty when the file is missing or unreadable.
+    """
+    path = os.path.join(session_dirs(session_id)['raw_dir'], SUBJECT_JSON_NAME)
+    if not os.path.exists(path):
+        logger.info(f"No subject metadata at {path}")
+        return {}
+
+    try:
+        with open(path, 'r') as f:
+            record = json.load(f)
+        details = record.get('subject_details', record)
+        date_of_birth = _subject_value(details.get('date_of_birth'))
+        return {
+            'subject_id': _subject_value(record.get('subject_id')),
+            'date_of_birth': datetime.fromisoformat(date_of_birth) if date_of_birth else None,
+            'genotype': _subject_value(details.get('genotype')),
+            'sex': _subject_value(details.get('sex')),
+            'species': _named(details.get('species')),
+            'strain': _named(details.get('strain')) or _named(details.get('background_strain')),
+        }
+    except Exception as e:
+        logger.warning(f"Could not read subject metadata from {path}: {e}")
+        return {}
+
+
+def _subject_sex(sex):
+    """Map a spelled-out sex to its NWB code, 'U' when it is missing or unrecognised."""
+    if sex is None:
+        return SEX_UNKNOWN
+    code = SEX_CODES.get(str(sex).strip().lower())
+    if code is None:
+        logger.warning(f"Unrecognised subject sex '{sex}', writing '{SEX_UNKNOWN}'")
+        return SEX_UNKNOWN
+    return code
+
+
+def _subject_date_of_birth(date_of_birth, session_start_time):
+    """Give a date of birth the session's timezone, so hdmf does not write a naive datetime."""
+    if date_of_birth is None:
+        return None
+    if getattr(date_of_birth, 'tzinfo', None) is None:
+        tzinfo = getattr(session_start_time, 'tzinfo', None) or tzlocal()
+        return date_of_birth.replace(tzinfo=tzinfo)
+    return date_of_birth
+
+
+def _subject_age(age, date_of_birth, session_start_time):
+    """
+    Age at the session as an ISO 8601 duration in whole days, e.g. 'P237D'.
+
+    Computed from the date of birth whenever both dates are known, since the curated
+    ephys NWBs carry a stringified timedelta ('P237 days, 11:30:09D') that is not a
+    valid duration. Dates are compared as calendar dates, which is what the raw ephys
+    NWBs' own 'P237D' counts. An inherited age is kept only if the computation is
+    impossible and the string is a valid duration.
+    """
+    if date_of_birth is not None and session_start_time is not None:
+        days = (session_start_time.date() - date_of_birth.date()).days
+        if days >= 0:
+            computed = f'P{days}D'
+            if age is not None and age != computed:
+                logger.info(f"Replacing inherited subject age '{age}' with computed {computed}")
+            return computed
+        logger.warning(f"Date of birth {date_of_birth.date()} is after the session, dropping age")
+        return None
+    if age is not None and not ISO8601_DURATION.match(str(age)):
+        logger.warning(f"Subject age '{age}' is not an ISO 8601 duration and no date of birth "
+                       f"is available to recompute it, dropping age")
+        return None
+    return age
+
+
+def _subject_description(description):
+    """Drop descriptions that only repeat the animal name (see UNINFORMATIVE_SUBJECT_DESCRIPTION)."""
+    if description is None or UNINFORMATIVE_SUBJECT_DESCRIPTION.match(str(description)):
+        return None
+    return description
+
+
+def build_subject(session_id, session_start_time, source_nwbs):
+    """
+    Build the merged NWB's Subject, inheriting each field from the first source that has it.
+
+    The source NWBs come first, in the order given, and the AIND subject.json in the
+    session's raw asset fills whatever they leave empty — for the Neuralynx sessions that
+    is everything but subject_id. A few fields are then normalised rather than copied
+    through, since the sources disagree with what NWB asks for: sex is coded to a single
+    letter, age is recomputed from the date of birth as an ISO 8601 duration, and a
+    description that only repeats the animal name is dropped (see the _subject_* helpers).
+    Weight is not inherited at all, see SUBJECT_FIELDS. Fields no source has are left unset, apart
+    from sex, which falls back to 'U' (unknown), and subject_id, which falls back to the
+    animal ID parsed out of session_id.
+
+    Args:
+        session_id: Session identifier
+        session_start_time: Session start time, used to compute age from the date of birth
+        source_nwbs: List of (label, nwb) pairs in priority order; the label is only used
+                     for logging and either NWB may be None
+
+    Returns:
+        pynwb.file.Subject
+    """
+    fields = {field: None for field in SUBJECT_FIELDS}
+    sources = [(label, _subject_fields_from_nwb(nwb)) for label, nwb in source_nwbs]
+    sources.append((SUBJECT_JSON_NAME, _subject_fields_from_json(session_id)))
+
+    inherited_from = {}
+    for label, candidate in sources:
+        for field, value in candidate.items():
+            if fields.get(field) is None and value is not None:
+                fields[field] = value
+                inherited_from[field] = label
+
+    animal_id, _, raw_id = parseSessionID(session_id)
+    if fields['subject_id'] is None:
+        logger.warning(f"No subject_id in any source, using the animal ID from {session_id}")
+        fields['subject_id'] = animal_id
+    elif animal_id is not None and str(fields['subject_id']) != str(animal_id):
+        logger.warning(f"Inherited subject_id '{fields['subject_id']}' does not match the animal "
+                       f"ID '{animal_id}' in {session_id}")
+
+    fields['species'] = _named(fields['species'])
+    fields['strain'] = _named(fields['strain'])
+    fields['sex'] = _subject_sex(fields['sex'])
+    fields['date_of_birth'] = _subject_date_of_birth(fields['date_of_birth'], session_start_time)
+    fields['age'] = _subject_age(fields['age'], fields['date_of_birth'], session_start_time)
+    fields['description'] = _subject_description(fields['description'])
+
+    kwargs = {field: value for field, value in fields.items() if value is not None}
+    logger.info('Subject: ' + ', '.join(
+        f"{field}={value!r} (from {inherited_from.get(field, 'derived')})"
+        for field, value in kwargs.items()))
+    missing = [field for field in SUBJECT_FIELDS if field not in kwargs]
+    if missing:
+        logger.info(f"Subject fields no source provided: {', '.join(missing)}")
+    return Subject(**kwargs)
+
+
 def photometry_channel_labels(session_id):
     """
     Build the channel index -> region label map for a session's photometry channels.
@@ -189,11 +502,19 @@ def photometry_channel_labels(session_id):
 
 def rename_photometry_acquisition(acq_name, channel_labels):
     """
-    Replace the channel index in a photometry acquisition name with its region label.
+    Replace the channel index in a photometry acquisition name with its region label
+    and spell the renamed name out as a description.
 
-    Photometry names are '<signal>_<channel index>[_<processing method>]', where signal
-    is G, Iso or G-Iso, e.g. 'G_1_tri-exp_mc' -> 'G_TH-R_tri-exp_mc'. Names that are not
-    photometry channels, or whose index has no label, are returned unchanged.
+    Photometry names are '<signal>_<channel index>[_<detrending method>][_mc]', where
+    signal is G, Iso or G-Iso, e.g. 'G_1_tri-exp_mc' -> 'G_TH-R_tri-exp_mc'. The region
+    label carries the implant hemisphere, so renamed channels read
+    '{signal}_{region}-{hemisphere}[_{detrending method}][_mc]' and the description
+    reads back one clause per token, e.g. 'G_Gi-L_exp_mc' as green fluorescence from
+    the fiber in Gi in the left hemisphere, detrended with the 'exp' method and motion
+    corrected. The detrending method and the '_mc' motion correction flag are passed
+    through as they are, including when the name has neither. Names that are not
+    photometry channels, or whose index has no label, are returned unchanged and
+    undescribed.
 
     Args:
         acq_name: acquisition name from the behavior NWB
@@ -201,17 +522,37 @@ def rename_photometry_acquisition(acq_name, channel_labels):
                         photometry_channel_labels()
 
     Returns:
-        (new_name, region_label). region_label is None when nothing was renamed.
+        (new_name, region_label, description). region_label and description are None
+        when nothing was renamed.
     """
     parts = acq_name.split('_')
     if len(parts) < 2 or parts[0] not in PHOTOMETRY_SIGNALS:
-        return acq_name, None
+        return acq_name, None, None
 
-    label = channel_labels.get(parts[1])
+    signal, index = parts[0], parts[1]
+    label = channel_labels.get(index)
     if label is None:
-        return acq_name, None
+        return acq_name, None, None
 
-    return '_'.join([parts[0], label] + parts[2:]), label
+    # Everything after the channel index is a detrending method, optionally followed
+    # by the 'mc' motion correction flag; either or both may be absent.
+    processing = parts[2:]
+    motion_corrected = bool(processing) and processing[-1] == 'mc'
+    detrending = processing[:-1] if motion_corrected else processing
+
+    region, _, hemisphere = label.rpartition('-')
+    location = (f'{region} in the {HEMISPHERE_NAMES[hemisphere]} hemisphere'
+                if hemisphere in HEMISPHERE_NAMES else label)
+
+    clauses = [f'{PHOTOMETRY_SIGNAL_DESCRIPTIONS[signal]} from the fiber in {location}']
+    clauses += [PHOTOMETRY_DETRENDING_DESCRIPTIONS.get(method, f"processed with '{method}'")
+                for method in detrending]
+    if motion_corrected:
+        clauses.append(PHOTOMETRY_MOTION_CORRECTION_DESCRIPTION)
+    # Keep the original channel index, it is the only link back to the raw data
+    description = f"{', '.join(clauses)}. Photometry channel {index} in the raw data."
+
+    return '_'.join([signal, label] + processing), label, description
 
 
 def pupil_data_to_timeseries(pupil_data):
@@ -436,24 +777,68 @@ def load_keypoint_tracking(session_id):
     return movs_table, kins_table
 
 
+def spike_times_are_samples(spike_times_col):
+    """
+    Detect spike times left as sample indices instead of seconds.
+
+    Compares the span (latest minus earliest spike across every unit) against the
+    longest session that could plausibly exist. The absolute values are not usable
+    here: correct seconds are offset onto an absolute clock, so the earliest spike
+    can itself be in the millions. The span is offset-free.
+
+    Args:
+        spike_times_col: iterable of per-unit spike time arrays
+
+    Returns:
+        (is_samples, span) where span is None if no unit holds any spike
+    """
+    lo = hi = None
+    for spike_times in spike_times_col:
+        if not isinstance(spike_times, (list, np.ndarray)):
+            continue
+        arr = np.asarray(spike_times, dtype=np.float64)
+        if arr.size == 0:
+            continue
+        lo = arr.min() if lo is None else min(lo, arr.min())
+        hi = arr.max() if hi is None else max(hi, arr.max())
+
+    if lo is None:
+        return False, None
+
+    span = float(hi - lo)
+    return span > MAX_PLAUSIBLE_SESSION_SECONDS, span
+
+
 def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     """
     Merge unit tables from custom pickle and NWB kilosort data.
 
     Args:
         session_id: Session identifier
-        data_type: 'curated' or 'raw'
-        return_nwb: If True, return (merged_df, ephys_nwb). If False, return just merged_df
+        data_type: 'curated' or 'raw'. If 'curated' and no curated unit table
+            exists, falls back to 'raw'.
+        return_nwb: If True, return (merged_df, ephys_nwb, data_type_used).
+            If False, return just merged_df
 
     Returns:
         If return_nwb=False: Merged DataFrame with mapped column names, or None if merge fails
-        If return_nwb=True: Tuple of (merged_df, ephys_nwb) or (None, None) if merge fails
+        If return_nwb=True: Tuple of (merged_df, ephys_nwb, data_type_used), where
+            data_type_used is the version actually loaded ('curated' or 'raw'),
+            or (None, None, None) if merge fails
+
+        Counts as a failure, so the caller builds an NWB without units: spike times
+        that are sample indices rather than seconds (see spike_times_are_samples).
     """
     # 1. Load custom unit table (use summary version)
     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
+    # commented out to make sure data is consistent with what is used in manuscript
+    # if custom_unit_tbl is None and data_type == 'curated':
+    #     logger.info(f"No curated unit table for {session_id} - falling back to raw")
+    #     data_type = 'raw'
+    #     custom_unit_tbl = get_unit_tbl(session_id, data_type=data_type, summary=True)
     if custom_unit_tbl is None or len(custom_unit_tbl) == 0:
         logger.warning(f"No custom unit table found for {session_id}")
-        return (None, None) if return_nwb else None
+        return (None, None, None) if return_nwb else None
 
     logger.info(f"Loaded {len(custom_unit_tbl)} units from custom table")
 
@@ -462,12 +847,12 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     nwb_path = session_dir.get(f'nwb_dir_{data_type}')
     if nwb_path is None or not os.path.exists(nwb_path):
         logger.warning(f"NWB file not found at {nwb_path}")
-        return (None, None) if return_nwb else None
+        return (None, None, None) if return_nwb else None
 
     ephys_nwb = load_nwb_from_filename(nwb_path)
     if ephys_nwb.units is None:
         logger.warning(f"No units in NWB file for {session_id}")
-        return (None, None) if return_nwb else None
+        return (None, None, None) if return_nwb else None
 
     nwb_unit_tbl = ephys_nwb.units.to_dataframe()
     logger.info(f"Loaded {len(nwb_unit_tbl)} units from NWB")
@@ -482,7 +867,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         nwb_id_col = 'unit_id'
     else:
         logger.error(f"NWB units table has neither 'ks_unit_id' nor 'unit_id'. Columns: {list(nwb_unit_tbl.columns)}")
-        return None
+        return (None, None, None) if return_nwb else None
 
     logger.info(f"Using NWB ID column: '{nwb_id_col}' for alignment")
     nwb_unit_ids = set(nwb_unit_tbl[nwb_id_col].values)
@@ -492,7 +877,7 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         logger.error(f"No common units found between custom and NWB tables!")
         logger.error(f"  Custom unit_ids ({len(custom_unit_ids)}): {sorted(list(custom_unit_ids))[:10]}")
         logger.error(f"  NWB {nwb_id_col} ({len(nwb_unit_ids)}): {sorted(list(nwb_unit_ids))[:10]}")
-        return None
+        return (None, None, None) if return_nwb else None
 
     if len(custom_unit_tbl) != len(common_ids):
         only_custom = custom_unit_ids - nwb_unit_ids
@@ -542,13 +927,41 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
 
     logger.info(f"Merged table has {len(merged_df)} rows and {len(merged_df.columns)} columns")
 
+    # Drop the whole table when the sorter left spike times as sample indices: rescaling
+    # them here would guess at a sampling rate, and passing them through would silently
+    # misalign every unit against the behavior clock. Checked before the dedup below so a
+    # doomed table does not pay for a np.unique over millions of spikes.
+    if 'spike_times' in merged_df.columns:
+        is_samples, span = spike_times_are_samples(merged_df['spike_times'])
+        if is_samples:
+            logger.error(
+                f"Dropping unit table for {session_id} ({data_type}): spike_times span "
+                f"{span:,.1f} exceeds {MAX_PLAUSIBLE_SESSION_SECONDS}s, so they are sample "
+                f"indices rather than seconds (as {NOMINAL_SAMPLING_RATE} Hz samples the span "
+                f"would be {span / NOMINAL_SAMPLING_RATE:,.1f}s). Building without units."
+            )
+            return (None, None, None) if return_nwb else None
+
+    # Remove duplicate spike times — equal consecutive values violate the NWB refractory-
+    if 'spike_times' in merged_df.columns:
+        def _clean_spike_times(st):
+            if isinstance(st, (list, np.ndarray)) and len(st) > 0:
+                return np.unique(np.asarray(st, dtype=np.float64))
+            return st
+        before = merged_df['spike_times'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else 0).sum()
+        merged_df['spike_times'] = merged_df['spike_times'].apply(_clean_spike_times)
+        after = merged_df['spike_times'].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else 0).sum()
+        if before != after:
+            logger.warning(f"Removed {before - after} duplicate spike times across all units")
+
     if return_nwb:
-        return merged_df, ephys_nwb
+        return merged_df, ephys_nwb, data_type
     else:
         return merged_df
 
 
-def build_combined_nwb(session_id, data_type='curated', save_file=None, add_metadata=False):
+def build_combined_nwb(session_id, data_type='curated', save_dir=None, add_metadata=False,
+                       backend='zarr'):
     """
     Build a complete NWB file with available data modalities.
 
@@ -557,16 +970,28 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     - Ephys units (merged custom + kilosort)
     - Acquisition TimeSeries (lick times, reward times, etc.)
 
+    Session and subject metadata are inherited from the source NWBs, the ephys one first
+    (see build_subject for how the Subject fields are filled).
+
     Args:
         session_id: Session identifier
-        data_type: 'curated' or 'raw'
-        save_file: Path to save NWB file (if None, returns in-memory only)
+        data_type: 'curated' or 'raw'. 'curated' falls back to 'raw' when no
+            curated unit table exists (the version used is reported as
+            'ephys_version' in the returned modalities dict)
+        save_dir: Directory to save the NWB into (if None, returns in-memory only).
+            The file name is built from the session and the modalities the file ended
+            up with, see nwb_file_name
         add_metadata: If True, bundle the raw AIND metadata JSON files into a
             LabMetaData container (see add_aind_metadata). Placeholder metadata,
             expected to be replaced by properly typed metadata later.
+        backend: 'zarr' to write a '<name>.nwb.zarr' directory store, or 'hdf5'
+            to write a single '<name>.nwb' file (see nwb_save_path)
 
     Returns:
         Tuple of (save_path, nwb_object, data_modalities_dict)
+        save_path is the written file or store path, None if save_dir was None, or the
+        string NO_VALID_DATA ('no valid data') if none of REQUIRED_MODALITIES were
+        found - in that case nothing is written and 'nwb_saved' stays None.
         data_modalities_dict has keys:
             'behavior_trials': bool - whether trial data is included
             'ephys_units': bool - whether ephys units are included
@@ -578,10 +1003,19 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
             'keypoint_tracking': bool - whether the tongue_kinematics table is included
             'aind_metadata': bool - whether the AIND metadata blob is included
             'beh_version': str - 'raw', 'processed', or 'none'
+            'ephys_version': str - unit table version actually used: 'curated', 'raw', or 'none'
             'nwb_created': str - ISO timestamp when NWB object was created
             'nwb_saved': str or None - ISO timestamp when NWB was saved to file (None if not saved)
     """
     logger.info(f"Building combined NWB for {session_id}")
+
+    # Checked up front: both only matter at the very end, where the file is named and
+    # written, and neither a bad backend nor an unnameable session should cost a whole
+    # build before it is reported
+    if backend not in NWB_BACKENDS:
+        raise ValueError(f"Unknown NWB backend '{backend}', expected one of {sorted(NWB_BACKENDS)}")
+    if save_dir is not None:
+        nwb_file_name(session_id, {}, backend)
 
     # Track which data modalities are included
     data_modalities = {
@@ -595,8 +1029,9 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         'keypoint_tracking': False,
         'aind_metadata': False,
         'beh_version': 'none',  # 'raw', 'processed', or 'none'
+        'ephys_version': 'none',  # unit table version actually used: 'curated', 'raw', or 'none'
         'nwb_created': None,  # Timestamp when NWB object was created
-        'nwb_saved': None,  # Timestamp when NWB file was saved (if save_file provided)
+        'nwb_saved': None,  # Timestamp when NWB file was saved (if save_dir provided)
     }
 
     # 1. Merge unit tables (optional - may not exist for all sessions)
@@ -607,9 +1042,10 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         merged_units = None
         ephys_nwb = None
     else:
-        merged_units, ephys_nwb = merge_result
-        logger.info(f"Merged {len(merged_units)} units")
+        merged_units, ephys_nwb, data_type = merge_result
+        logger.info(f"Merged {len(merged_units)} units from the {data_type} unit table")
         data_modalities['ephys_units'] = True
+        data_modalities['ephys_version'] = data_type
 
     # 2. Load session/trial table (optional - may not exist for all sessions)
     # Try raw version first, then processed version
@@ -643,13 +1079,20 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     source_nwb = ephys_nwb if ephys_nwb is not None else behavior_nwb
 
     if source_nwb is not None:
-        session_description = source_nwb.session_description
+        session_description = f"Combined data for {session_id}"
         session_start_time = source_nwb.session_start_time
         source_session_id = source_nwb.session_id if hasattr(source_nwb, 'session_id') else session_id
         logger.info(f"Using metadata from {'ephys' if ephys_nwb is not None else 'behavior'} NWB")
+        # remove .json from end of source_sessison_id if it exist
+        if source_session_id.endswith(".json"):
+            source_session_id = source_session_id[:-5]
+        # Add "behavior_" to the beginning if it doesn't already exist
+        if not source_session_id.startswith("behavior_") and not source_session_id.startswith("ecephys_"):
+            source_session_id = "behavior_" + source_session_id
+                # add 'behavior_" to start of source_session_id it it doesn't start with it
     else:
         # Fallback to defaults
-        session_description = f"Combined behavior and ephys data for {session_id}"
+        session_description = f"Combined data for {session_id}"
         session_dir = session_dirs(session_id)
         session_start_time = session_dir.get('datetime')
         if session_start_time is None:
@@ -659,14 +1102,24 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         source_session_id = session_id
         logger.info("Using default metadata (no source NWB available)")
 
-    # 4. Create NWB file
+    # 4. Create NWB file, with the subject inherited from the source NWBs (and the raw
+    # asset's subject.json for whatever they leave empty)
     creation_time = datetime.now(tzlocal())
+    subject = build_subject(
+        session_id,
+        session_start_time,
+        [('ephys NWB', ephys_nwb), ('behavior NWB', behavior_nwb)],
+    )
+    animal_id, _, raw_id = parseSessionID(session_id)
     new_nwb = NWBFile(
         session_description=session_description,
+        subject=subject,
         identifier=f"{session_id}_merged_{creation_time.strftime('%Y%m%d_%H%M%S')}",
         session_start_time=session_start_time,
-        session_id=source_session_id,
+        session_id=raw_id, # use current session_id instead of inheriting from source nwbs
         institution='Allen Institute for Neural Dynamics',
+        source_script='https://github.com/AllenNeuralDynamics/LC-beh-physiology-analysis/blob/pack/code/data_management/build_merged_nwb.py',
+        source_script_file_name='build_merged_nwb.py'
     )
 
     # Track creation time
@@ -721,12 +1174,15 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
         # Photometry channels are renamed from channel index to brain region
         channel_labels = photometry_channel_labels(session_id)
         for acq_name, acq_data in behavior_nwb.acquisition.items():
+            if acq_name.split('_')[0] in PHOTOMETRY_SIGNALS_SKIPPED:
+                logger.info(f"Skipping acquisition TimeSeries: {acq_name} (skipped photometry signal)")
+                continue
             if hasattr(acq_data, 'timestamps') and len(acq_data.timestamps) > 1:
-                new_name, region_label = rename_photometry_acquisition(acq_name, channel_labels)
+                new_name, region_label, photometry_description = rename_photometry_acquisition(
+                    acq_name, channel_labels)
                 description = acq_data.description if hasattr(acq_data, 'description') else ''
-                if region_label is not None:
-                    # Keep the original channel index, it is the only link back to the raw data
-                    description = f"{description} (fiber in {region_label}, channel {acq_name.split('_')[1]})".strip()
+                if photometry_description is not None:
+                    description = photometry_description
 
                 # Copy TimeSeries to new NWB
                 from pynwb import TimeSeries
@@ -897,7 +1353,7 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     if add_metadata:
         md = write_session_metadata(session_id, include_tongue=movement_table is not None, include_keypoint=True)
         if md is not None:
-            add_aind_metadata(new_nwb, md.model_dump())
+            add_aind_metadata(new_nwb, md.model_dump_json())
             data_modalities['aind_metadata'] = True
             logger.info(f"Added AIND metadata to lab_meta_data['{AIND_LAB_META_DATA_KEY}']")
         else:
@@ -907,23 +1363,37 @@ def build_combined_nwb(session_id, data_type='curated', save_file=None, add_meta
     included_modalities = [k for k, v in data_modalities.items() if v]
     logger.info(f"Data modalities included: {', '.join(included_modalities) if included_modalities else 'none'}")
 
-    # 9. Save if requested (zarr backend; the store is a directory, so make sure
-    # the path carries the .zarr suffix rather than collide with an .nwb file)
-    if save_file is not None:
-        if not save_file.endswith('.zarr'):
-            save_file = save_file + '.zarr'
-        os.makedirs(os.path.dirname(save_file), exist_ok=True)
-        # mode='w' overwrites, but a zarr store has to be a directory: drop any
-        # regular file sitting at this path (e.g. left by the HDF5 backend).
-        if os.path.exists(save_file) and not os.path.isdir(save_file):
+    # 9. Nothing but metadata: not worth a file, so report it in place of the path
+    if not any(data_modalities[modality] for modality in REQUIRED_MODALITIES):
+        logger.warning(
+            f"No valid data for {session_id} (none of {', '.join(REQUIRED_MODALITIES)}) - skipping save"
+        )
+        return NO_VALID_DATA, new_nwb, data_modalities
+
+    # 10. Save if requested, under a name built from the session and the modalities that
+    # made it into the file, with the extension the chosen backend needs ('.nwb' for
+    # hdf5, '.nwb.zarr' for the zarr directory store)
+    if save_dir is not None:
+        save_file = os.path.join(save_dir, nwb_file_name(session_id, data_modalities, backend))
+        io_class = NWB_BACKENDS[backend][1]
+        os.makedirs(save_dir, exist_ok=True)
+        # mode='w' overwrites, but only in kind: a zarr store has to be a directory and
+        # an hdf5 file a regular file, so drop whatever is at the path if it is neither.
+        if backend == 'zarr' and os.path.exists(save_file) and not os.path.isdir(save_file):
             logger.warning(f"Removing non-directory file at {save_file} to make room for the zarr store")
             os.remove(save_file)
+        if backend == 'hdf5' and os.path.isdir(save_file):
+            raise IsADirectoryError(
+                f"{save_file} is a directory (a zarr store?), cannot write an hdf5 file there - "
+                f"remove it or build with backend='zarr'"
+            )
         save_time = datetime.now(tzlocal())
-        with NWBZarrIO(save_file, mode='w') as io:
+        with io_class(save_file, mode='w') as io:
             io.write(new_nwb)
         data_modalities['nwb_saved'] = save_time.isoformat()
-        logger.info(f"Saved combined NWB to {save_file}")
+        logger.info(f"Saved combined NWB ({backend}) to {save_file}")
     else:
+        save_file = None
         logger.info("Generated NWB in memory only (no file written)")
 
     return save_file, new_nwb, data_modalities
@@ -934,7 +1404,15 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
     sessions = [
+        'behavior_ZS062_2021-05-06_15-46-14',
+        'behavior_ZS059_2021-04-29_14-02-45',
+        'behavior_ZS061_2021-04-08_18-01-30',
+        'behavior_781166_2025-05-13_14-04-27',
+        'behavior_754897_2025-03-12_12-23-15',
         'behavior_754897_2025-03-13_11-20-42',
+        'behavior_754898_2025-01-01_20-40-03',
+        'behavior_749472_2025-01-09_13-56-02',
+        'behavior_754896_2025-01-03_17-20-19',
     ]
 
     for session in sessions:
@@ -944,9 +1422,12 @@ if __name__ == '__main__':
 
 
         # Test the full build_combined_nwb function
-        save_path, nwb, modalities = build_combined_nwb(session, data_type='curated', save_file=None)
+        save_path, nwb, modalities = build_combined_nwb(session, data_type='curated', save_dir=None)
         if nwb is not None:
             print(f"\n✓ Success! Combined NWB created")
+            print(f"  Subject: " + ', '.join(
+                f"{field}={getattr(nwb.subject, field)!r}" for field in SUBJECT_FIELDS
+                if getattr(nwb.subject, field, None) is not None))
             print(f"  Trials: {len(nwb.trials) if nwb.trials is not None else 0} rows")
             print(f"  Units: {len(nwb.units) if nwb.units is not None else 0} rows")
             print(f"  Modalities: {', '.join(k for k, v in modalities.items() if v)}")

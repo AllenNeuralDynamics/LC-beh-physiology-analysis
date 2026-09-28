@@ -16,12 +16,13 @@ build_combined_nwb() once per session in a joblib worker and returns a flat
 result row, exactly as the notebook does.
 
 Build parameters come from a JSON file in code/data_management (created with
-defaults if absent), can be overridden per run with --n-jobs / --add-metadata,
-and a copy is written into the results folder so every run records what it was
-given.
+defaults if absent), can be overridden per run with --n-jobs / --add-metadata /
+--backend, and a copy is written into the results folder so every run records
+what it was given.
 
 Outputs, all under --results-dir (default /root/capsule/results):
-    nwb/<session>_combined.nwb.zarr   the zarr stores
+    nwb/<session>_combined.nwb.zarr   the zarr stores (--backend zarr, the default)
+    nwb/<session>_combined.nwb        single-file NWBs instead, with --backend hdf5
     logs/<session>.log               per-session build log
     build_all_nwb.log                the full run log (same text as stdout)
     nwb_build_params.json            copy of the parameters used
@@ -30,6 +31,7 @@ Outputs, all under --results-dir (default /root/capsule/results):
 Usage:
     python build_all_nwb.py --mode test
     python build_all_nwb.py --mode production --n-jobs 8 --add-metadata
+    python build_all_nwb.py --mode test --backend hdf5
 """
 import argparse
 import io
@@ -70,6 +72,7 @@ DEFAULT_PARAMS = {
     'build_one': {
         'data_type': 'curated',
         'add_metadata': True,
+        'backend': 'zarr',
     },
     'parallel': {
         'n_jobs': 4,
@@ -153,6 +156,8 @@ def gather_sessions(mode):
             for name in SESSION_ASSET_CSVS
         ]
         df = pd.concat(dfs)
+        # drop rows with no raw data asset: nothing to build from
+        df = df[df['raw_data'].notna()]
         session_ids = df['session_id'].values
         # filter only behavior sessions (blank rows in the CSVs come through as NaN)
         session_ids = [session_id for session_id in session_ids if isinstance(session_id, str)]
@@ -168,37 +173,6 @@ def gather_sessions(mode):
     if dropped:
         logging.info(f"Excluded {len(dropped)} session(s) via sessions_to_exclude.txt: {dropped}")
     return [s for s in session_ids if s not in excluded]
-
-
-def _json_default(obj):
-    """Fallback encoder: ISO strings for date/datetime/time, str() for the rest."""
-    if hasattr(obj, 'isoformat'):
-        return obj.isoformat()
-    return str(obj)
-
-
-def patch_metadata_json_encoding():
-    """Let add_metadata=True survive metadata fields that json.dumps can't encode.
-
-    build_combined_nwb calls add_aind_metadata(nwb, md.model_dump()), and a
-    python-mode model_dump leaves date objects behind, so json.dumps raises
-    "Object of type date is not JSON serializable". The real fix is one word
-    upstream -- model_dump(mode='json') in build_merged_nwb.py -- but that file
-    isn't ours to edit, so wrap the function from out here instead. Delete this
-    once upstream handles it.
-
-    Called from inside the worker: the patch mutates another module, so it does
-    not travel with the pickled task. Idempotent, so re-used workers are fine.
-    """
-    if getattr(build_merged_nwb.add_aind_metadata, '_json_safe', False):
-        return
-    original = build_merged_nwb.add_aind_metadata
-
-    def add_aind_metadata_json_safe(nwb_file, meta_dict):
-        return original(nwb_file, json.loads(json.dumps(meta_dict, default=_json_default)))
-
-    add_aind_metadata_json_safe._json_safe = True
-    build_merged_nwb.add_aind_metadata = add_aind_metadata_json_safe
 
 
 def build_one(session, save_dir, log_dir, **kwargs):
@@ -227,9 +201,10 @@ def build_one(session, save_dir, log_dir, **kwargs):
 
     started = datetime.now()
     try:
-        patch_metadata_json_encoding()
-        # build_combined_nwb writes zarr, so it returns the actual store path (save_file + '.zarr')
-        kwargs['save_file'] = os.path.join(save_dir, f"{session}_combined.nwb")
+        # build_combined_nwb names the file itself (from the session and the modalities
+        # it found) and sets the extension from its backend, so it returns the actual
+        # path written
+        kwargs['save_dir'] = save_dir
         logging.info(f"Building {session}: {kwargs}")
         nwb_path, _, modalities = build_combined_nwb(session, **kwargs)
         # flatten: each key in modalities becomes its own column
@@ -277,6 +252,8 @@ def main(argv=None):
                         help='override parallel.n_jobs from the params file (memory-bound, not CPU-bound)')
     parser.add_argument('--add-metadata', action=argparse.BooleanOptionalAction, default=None,
                         help='override build_one.add_metadata from the params file: bundle the raw AIND metadata JSON into each NWB')
+    parser.add_argument('--backend', choices=['zarr', 'hdf5'], default=None,
+                        help="override build_one.backend from the params file: 'zarr' writes <session>_combined.nwb.zarr stores, 'hdf5' writes <session>_combined.nwb files")
     parser.add_argument('--fail-on-error', action='store_true',
                         help='exit nonzero if any session failed, instead of only reporting it')
     args = parser.parse_args(argv)
@@ -297,6 +274,8 @@ def main(argv=None):
         params['parallel']['n_jobs'] = args.n_jobs
     if args.add_metadata is not None:
         params['build_one']['add_metadata'] = args.add_metadata
+    if args.backend is not None:
+        params['build_one']['backend'] = args.backend
     params_copy = os.path.join(results_dir, 'nwb_build_params.json')
     with open(params_copy, 'w') as f:
         json.dump(params, f, indent=2)

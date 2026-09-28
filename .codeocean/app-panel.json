@@ -36,6 +36,14 @@
 			"value_type": "string",
 			"default_value": "False",
 			"required": true
+		},
+		{
+			"id": "ZTH5omEQlrDNjbze",
+			"name": "backend",
+			"description": "Backend of nwb packing",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "hdf5"
 		}
 	]
 }
