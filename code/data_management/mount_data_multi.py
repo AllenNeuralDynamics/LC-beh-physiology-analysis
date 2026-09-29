@@ -2,7 +2,19 @@
 from codeocean.data_asset import DataAssetParams, DataAssetSearchParams,DataAssetAttachParams, Source, AWSS3Source
 import pandas as pd
 import os
-os.sys.path.append('/root/capsule/code/beh_ephys_analysis')
+# Resolve code/beh_ephys_analysis (the folder containing `utils`) relative to this
+# file's location, so imports work no matter where the repo is checked out.
+import os
+import sys
+_anchor = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.path.abspath(os.getcwd())
+while _anchor != os.path.dirname(_anchor):
+    _beh_ephys_root = os.path.join(_anchor, "code", "beh_ephys_analysis")
+    if os.path.isdir(os.path.join(_beh_ephys_root, "utils")):
+        if _beh_ephys_root in sys.path:
+            sys.path.remove(_beh_ephys_root)
+        sys.path.insert(0, _beh_ephys_root)
+        break
+    _anchor = os.path.dirname(_anchor)
 from utils.beh_functions import parseSessionID
 import os, sys
 from codeocean import CodeOcean
@@ -31,10 +43,14 @@ for curr_col in col_to_attach:
     all_ids.extend(curr_ids)
     all_mounts.extend(curr_mount)
 #%%
-# all_ids = all_ids + ['f908dd4d-d7ed-4d52-97cf-ccd0e167c659']
-# all_mounts = all_mounts + ['all_behavior']
-all_ids = all_ids + ['c1a35fd0-c3aa-47a8-ba40-288b1e39a86a', 'ac7c7961-9178-4bf9-9d66-0a426cf3cc24', '1a8bede7-bdc1-4b41-8290-bc0bdafdf019', 'c712751d-f744-4fe8-9657-93a7084eab22', 'adf4f98c-5015-4d23-81e3-359a9a5b6ec1', 'c712751d-f744-4fe8-9657-93a7084eab22']
-all_mounts = all_mounts + ['alignment_fix', 'dorsal_edges', 'merfish_data', 'LC_percentile_meshes', 'all_tongue_movements_16092025']
+
+combined_assets_path = os.path.join(script_dir, 'combined_assets.csv')
+combined_df = pd.read_csv(combined_assets_path)
+combined_df.columns = combined_df.columns.str.strip()
+combined_df['id'] = combined_df['id'].str.strip().str.strip('\'"')
+combined_df['mount_name'] = combined_df['mount_name'].str.strip().str.strip('\'"')
+all_ids.extend(combined_df['id'].tolist())
+all_mounts.extend(combined_df['mount_name'].tolist())
 
 # Generate the list of DataAssetAttachParams objects
 all_mounts_new = []

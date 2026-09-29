@@ -93,7 +93,7 @@ if overview:
 # # Overview by regression over trial time
 
     # %%
-    data_type = 'curated'
+    data_type = 'raw'
     target = 'soma'
     all_coefs = []
     all_T = []
@@ -309,7 +309,7 @@ coeff_regressors_indi_mc = t_regressors_e.copy()
 all_coefs = []
 all_T = []
 all_p = []
-data_type = 'curated'
+data_type = 'raw'
 align_name = 'response'
 focus_label = 'outcome'
 model_name = 'stan_qLearning_5params'

@@ -915,8 +915,7 @@ def generate_session_opto_drift_trial_table(session, data_type, opto_only = True
                 temp = temp[(temp >= cut_off[0]) & (temp <= cut_off[1])]
                 if temp.size > 0:
                     unit_amp[i] = np.mean(temp)
-        if unit_id == 43:
-            print(unit_id)
+
         amp_mode, _ = mode_by_bins(unit_amp, 10.0)
         _, time_edges = mode_by_bins(spike_times, 60*10.0)
         if motion_info is not None:

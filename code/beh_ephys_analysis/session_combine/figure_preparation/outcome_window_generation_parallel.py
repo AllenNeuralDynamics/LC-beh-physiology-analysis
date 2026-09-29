@@ -254,7 +254,7 @@ def compute_outcome_window_parallel(criteria_name, pre_event, post_event, n_jobs
     step_size = 0.1
     labels = ['outcome', 'hit', 'svs']
     align = 'go_cue_time'
-    data_type = 'curated'
+    data_type = 'raw'
     model_name = 'stan_qLearning_5params'
     slide_times_auc = _expected_slide_times(pre_event, post_event, step_size)
 

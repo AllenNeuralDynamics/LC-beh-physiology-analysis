@@ -34,14 +34,15 @@ pip install --no-cache-dir diptest==0.11.0
 # pip install pandas
 # pip install numpy
 
-# #install updated version of code-server
-# VERSION=4.103.2
-# mkdir /.code-server
-# cd /.code-server
-# curl -fL "https://github.com/coder/code-server/releases/download/v$VERSION/code-server-$VERSION-linux-amd64.tar.gz" \
-#   | tar -xz
-# ln -s /.code-server/code-server-$VERSION-linux-amd64/bin/code-server  /usr/bin/code-server
-# cd -
+# install updated version of code-server
+# the base image already ships 4.112.0 in /.code-server with /usr/bin/code-server
+# symlinked to it, so use mkdir -p / ln -sf to avoid failing on the existing paths
+VERSION=4.139.1
+mkdir -p /.code-server
+curl -fL "https://github.com/coder/code-server/releases/download/v$VERSION/code-server-$VERSION-linux-amd64.tar.gz" \
+  | tar -xz -C /.code-server
+ln -sfn /.code-server/code-server-$VERSION-linux-amd64/bin/code-server /usr/bin/code-server
+code-server --version
 
 
 # mkdir -p /.vscode/extensions

@@ -95,7 +95,7 @@ def compute_outcome_window(criteria_name, pre_event,post_event):
     align = 'go_cue_time'
     loaded_session = None
     curr_session = None
-    data_type = 'curated'
+    data_type = 'raw'
     model_name = 'stan_qLearning_5params'
     for ind, row in combined_tagged_units_filtered.iterrows():
         session = row['session']                           

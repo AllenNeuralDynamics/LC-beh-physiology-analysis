@@ -101,7 +101,7 @@ combined_tagged_units['tier_2_long'].fillna(False, inplace=True)
 
 # %%
 density = False
-criteria_name = 'basic_ephys_all'
+criteria_name = 'basic_ephys_low_DRN'
 with open(os.path.join('/root/capsule/code/beh_ephys_analysis/session_combine/metrics', f'{criteria_name}.json'), 'r') as f:
     constraints = json.load(f)
     
