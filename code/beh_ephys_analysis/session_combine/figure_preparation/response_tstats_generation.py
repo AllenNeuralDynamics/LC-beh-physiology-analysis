@@ -44,7 +44,7 @@ from scipy.stats import pearsonr
 from aind_ephys_utils import align
 capsule_dirs = capsule_directories()
 # %%
-criteria_name = 'beh_all'
+criteria_name = 'beh_all_DRN'
 version = 'PrL_S1'
 # load constraints and data
 with open(os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'combined_unit_tbl', 'combined_unit_tbl.pkl'), 'rb') as f:
