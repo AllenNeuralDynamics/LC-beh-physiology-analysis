@@ -90,13 +90,15 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
     pdf_dir = os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], align_name)
     if not os.path.exists(pdf_dir):
         os.makedirs(pdf_dir, exist_ok=True)
-    # remove all files in pdf_dir if exists
-    for f in os.listdir(pdf_dir):
-        path = os.path.join(pdf_dir, f)
-        if os.path.isfile(path) or os.path.islink(path):
-            os.remove(path)  # Remove files
-        elif os.path.isdir(path):
-            shutil.rmtree(path)  # Remove subdirectories
+    # remove all files in pdf_dir if exists, but only when regenerating the whole
+    # session: with an explicit `units` list the other units' figures must survive
+    if units is None:
+        for f in os.listdir(pdf_dir):
+            path = os.path.join(pdf_dir, f)
+            if os.path.isfile(path) or os.path.islink(path):
+                os.remove(path)  # Remove files
+            elif os.path.isdir(path):
+                shutil.rmtree(path)  # Remove subdirectories
         
     # %%
     qm_dir = os.path.join(session_dir['processed_dir'], f'{session}_qm.json')
@@ -420,7 +422,7 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
                 gs = gridspec.GridSpec(3, 7, height_ratios=[1, 1, 1], wspace=0.3, hspace=0.3)
                 ax = fig.add_subplot(gs[0,-1])
                 try: 
-                    regressors, TvCurrU, PvCurrU, EvCurrU = fitSpikeModelG(session_df_curr, spike_matrix_LM, formula)
+                    regressors, TvCurrU, PvCurrU, EvCurrU, ciCurrU, r2_score_value = fitSpikeModelG(session_df_curr, spike_matrix_LM, formula)
                     TvCurrUSig = TvCurrU.copy()
                     TvCurrUSig[PvCurrU>=0.05] = np.nan
                     cmap = plt.get_cmap('viridis')
@@ -440,8 +442,8 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
                     ax.legend(fontsize = fsLegend)
                     ax.set_xlabel(f'Time from {align_name} (s)')
                     ax.set_title('p-value', fontsize = fs)
-                except:
-                    print(f'Failed to fit model for unit {unit_id}')
+                except Exception as e:
+                    print(f'Failed to fit model for unit {unit_id}: {type(e).__name__}: {e}')
             plt.suptitle(f'Unit{str(unit_id)} Aligned to {align_name} default qc: {qc_pass} maybe opto: {opto_pass}', fontsize = 20) 
             # plt.tight_layout()  
         return fig
@@ -1035,8 +1037,8 @@ if __name__ == '__main__':
     #                     units=[82])
     # Parallel(n_jobs=12)(delayed(process_session)(session) for session in session_ids[76:])
 
-for session in session_ids:
-    try:
-        process_session(session)
-    except:
-        print(f'Failed to process {session}')
+    for session in session_ids:
+        try:
+            process_session(session)
+        except Exception as e:
+            print(f'Failed to process {session}: {type(e).__name__}: {e}')

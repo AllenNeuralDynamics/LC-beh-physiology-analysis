@@ -1,0 +1,65 @@
+{
+  "isi_violations": {
+    "bounds": [
+      0.0,
+      0.2
+    ]
+  },
+  "p_max": {
+    "bounds": [
+      0.5,
+      1.0
+    ]
+  },
+  "lat_max_p": {
+    "bounds": [
+      0.002,
+      0.02
+    ]
+  },
+  "eu": {
+    "bounds": [
+      0.0,
+      0.4
+    ]
+  },
+  "corr": {
+    "bounds": [
+      0.9,
+      1.0
+    ]
+  },
+  "qc_pass": {
+    "items": [
+      true
+    ]
+  },
+  "peak":{
+    "bounds": [
+      -1000,
+      500
+    ]
+  },
+  "trial_count": {
+    "bounds": [
+      100,
+      2000
+    ]
+  },
+  "sig_counts":{
+    "bounds": [
+      4.5,
+      6
+    ]
+  },
+  "in_df": {
+    "items": [
+      true
+    ]
+  },
+  "probe":{
+    "items": [
+    "2"
+    ]
+  }
+}

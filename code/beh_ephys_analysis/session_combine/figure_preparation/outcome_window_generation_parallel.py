@@ -389,8 +389,8 @@ def compute_outcome_window_parallel(criteria_name, pre_event, post_event, n_jobs
         mode_p = np.nan
         mode_n = np.nan
 
-    plt.suptitle('AUC for each label')
-    plt.savefig(os.path.join(metrics_folder, f'AUC_hist_{criteria_name}.pdf'), bbox_inches='tight')
+    plt.suptitle(f'Peak-AUC lag distribution ({label})')
+    plt.savefig(os.path.join(metrics_folder, f'AUC_lag_modes_{criteria_name}.pdf'), bbox_inches='tight')
     plt.close(fig)
 
     window_dict = {'late': mode_n, 'early': mode_p}
