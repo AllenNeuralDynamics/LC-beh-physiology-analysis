@@ -1,0 +1,94 @@
+2D_matrix_of_aligned_fake_raw_waveform  (111, 7, 180)  float64
+2D_matrix_of_aligned_raw_waveform  (111, 7, 180)  float64
+2D_matrix_of_fake_raw_waveform  (111, 7, 180)  float64
+2D_matrix_of_optimized_waveform  (111, 7, 180)  float64
+2D_matrix_of_raw_waveform  (111, 7, 180)  float64
+amplitude  (111,)  float64
+amplitude_cutoff  (111,)  float64
+amplitude_cv_median  (111,)  float64
+amplitude_cv_range  (111,)  float64
+amplitude_median  (111,)  float64
+amplitude_of_fake_raw_waveform  (111,)  float64
+amplitude_of_optimized_waveform  (111,)  float64
+amplitude_of_raw_waveform  (111,)  float64
+amplitude_of_spike_waveform  (111,)  float64
+bottom_of_LC_range  (111,)  float64
+d_prime  (111,)  float64
+decoder_label  (111,)  object
+decoder_probability  (111,)  float64
+default_qc  (111,)  bool
+depth  (111,)  float64
+device_name  (111,)  object
+drift_mad  (111,)  float64
+drift_ptp  (111,)  float64
+drift_std  (111,)  float64
+estimated_x  (111,)  float64
+estimated_y  (111,)  float64
+estimated_z  (111,)  float64
+exp_decay  (111,)  object
+firing_range  (111,)  float64
+firing_rate  (111,)  float64
+half_width  (111,)  object
+id  (111,)  int64
+if_real_unit  (111,)  bool
+isi_violations_count  (111,)  int64
+isi_violations_ratio  (111,)  float64
+isolation_distance  (111,)  float64
+ks_unit_id  (111,)  int64
+l_ratio  (111,)  float64
+location_along_probe  (111,)  float64
+location_of_tagged_unit  (111,)  bool
+maximum_increase_of_p(response_cond_laser)  (111,)  float64
+maximum_increase_of_p(response_cond_laser)_from_baseline  (111,)  float64
+mean_p(response_cond_laser)  (111,)  float64
+mean_spike_latency  (111,)  float64
+nn_hit_rate  (111,)  float64
+nn_miss_rate  (111,)  float64
+num_negative_peaks  (111,)  object
+num_positive_peaks  (111,)  object
+num_spikes  (111,)  int64
+number_of_pulses_passing_in_opto_tagging  (111,)  int64
+opto_tagged_lowbar  (111,)  bool
+opto_tagged_midbar  (111,)  bool
+peak  (111,)  float64
+peak_of_aligned_optimized_waveform  (111, 90)  float64
+peak_of_aligned_waveform  (111, 90)  float64
+peak_of_fake_raw_waveform  (111,)  float64
+peak_of_optimized_waveform  (111, 90)  float64
+peak_of_waveform  (111, 90)  float64
+peak_to_valley  (111,)  object
+peak_trough_ratio  (111,)  object
+peak_value_of_raw_waveform  (111,)  float64
+peak_waveform_aligned_fake_raw  (111, 90)  float64
+peak_waveform_fake_raw  (111, 120)  float64
+presence_ratio  (111,)  float64
+recovery_slope  (111,)  object
+repolarization_slope  (111,)  object
+rp_contamination  (111,)  float64
+rp_violations  (111,)  int64
+sd_of_waveform_2d  (111, 7, 180)  float64
+shank  (111,)  object
+silhouette  (111,)  float64
+sliding_rp_violation  (111,)  float64
+snr  (111,)  float64
+spike_latency_at_maximum_p(response_cond_laser)  (111,)  float64
+spike_times  (3306771,)  float64
+spike_times_index  (111,)  uint32
+spread  (111,)  object
+sync_spike_2  (111,)  float64
+sync_spike_4  (111,)  float64
+sync_spike_8  (111,)  float64
+top_of_LC_range  (111,)  float64
+unit_id  (111,)  int64
+unit_name  (111,)  object
+velocity_above  (111,)  object
+velocity_below  (111,)  object
+waveform_correlation_at_maximum_p(response_cond_laser)  (111,)  float64
+waveform_euclidean_distance_at_maximum_p(response_cond_laser)  (111,)  float64
+waveform_mean  (111, 210, 384)  float64
+waveform_on_peak_channel_of_aligned_raw_waveform  (111, 90)  float64
+waveform_on_peak_channel_of_raw_waveform  (111, 120)  float64
+waveform_sd  (111, 210, 384)  float64
+x_coordinate_in_ccf_space  (111,)  float64
+y_coordinate_in_ccf_space  (111,)  float64
+z_coordinate_in_ccf_space  (111,)  float64

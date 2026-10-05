@@ -1,0 +1,113 @@
+{
+  "isi_violations_ratio": {
+    "bounds": [
+      0.0,
+      0.1
+    ]
+  },
+  "maximum_increase_of_p(response_cond_laser)": {
+    "bounds": [
+      0.5,
+      1.0
+    ]
+  },
+  "spike_latency_at_maximum_p(response_cond_laser)": {
+    "bounds": [
+      0.002,
+      0.02
+    ]
+  },
+  "waveform_euclidean_distance_at_maximum_p(response_cond_laser)": {
+    "bounds": [
+      0.0,
+      0.35
+    ]
+  },
+  "waveform_correlation_at_maximum_p(response_cond_laser)": {
+    "bounds": [
+      0.95,
+      1.0
+    ]
+  },
+  "default_qc": {
+    "items": [
+      true
+    ]
+  },
+  "peak": {
+    "bounds": [
+      -1000,
+      500
+    ]
+  },
+  "number_of_pulses_passing_in_opto_tagging": {
+    "bounds": [
+      4.5,
+      6
+    ]
+  },
+  "in_df": {
+    "items": [
+      true
+    ]
+  },
+  "location_along_probe": {
+    "conditional": [
+      {
+        "if": { "probe": ["==", "2"] },
+        "bounds": [0, 2000]
+      },
+      {
+        "else": true,
+        "bounds": [0, null]
+      }
+    ]
+  },
+  "trial_count": {
+    "bounds": [
+      100,
+      2000
+    ]
+  },
+  "session_len": {
+    "bounds": [
+      100,
+      2000
+    ]
+  },
+  "p_sw_L": {
+    "bounds": [
+      0.05,
+      1
+    ]
+  },
+  "aN": {
+    "bounds": [
+      0.05,
+      1.0
+    ]
+  },
+  "diff_1": {
+    "bounds": [
+      0,
+      "nan"
+    ]
+  },
+  "intercept": {
+    "bounds": [
+      -3,
+      3
+    ]
+  },
+  "sw_bias": {
+    "bounds": [
+      -1,
+      1
+    ]
+  },
+  "lick_bias": {
+    "items": [
+      false
+    ]
+  }
+}
