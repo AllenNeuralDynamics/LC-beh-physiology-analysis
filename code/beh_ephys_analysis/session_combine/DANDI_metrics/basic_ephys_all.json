@@ -2,7 +2,7 @@
   "isi_violations_ratio": {
     "conditional": [
       {
-        "if": { "tier_1": ["==", true] },
+        "if": { "antidromic_tier_1": ["==", true] },
         "bounds": [0, 0.20]
       },
       {
@@ -52,7 +52,7 @@
       6
     ]
   },
-  "sd": {
+  "firing_rate_stability": {
     "bounds": [
       0,
       0.3

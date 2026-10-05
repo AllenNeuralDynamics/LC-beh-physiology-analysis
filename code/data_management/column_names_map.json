@@ -129,7 +129,17 @@
     "x_ccf": "x_coordinate_in_ccf_space",
     "y_ccf": "y_coordinate_in_ccf_space",
     "z_ccf": "z_coordinate_in_ccf_space",
-    "loc_along_probe": "loc_along_probe"
+    "loc_along_probe": "loc_along_probe",
+    "firing_rate_stability": "firing_rate_stability",
+    "ephys_cut_start": "ephys_cut_start",
+    "ephys_cut_end": "ephys_cut_end",
+    "opto_NE_paper": "opto_NE_paper",
+    "antidromic_tier_1": "antidromic_tier_1",
+    "antidromic_tier_2": "antidromic_tier_2",
+    "antidromic_latency": "antidromic_latency",
+    "antidromic_jitter": "antidromic_jitter",
+    "p_antidromic": "p_antidromic",
+    "p_collision": "p_collision"
   },
   "unit_columns_ks": {
     "electrodes": "electrodes",

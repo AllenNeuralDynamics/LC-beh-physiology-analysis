@@ -12,6 +12,7 @@ import glob
 import json
 import logging
 import os
+import pickle
 import re
 import tempfile
 import pandas as pd
@@ -28,6 +29,8 @@ import sys
 sys.path.insert(0, '/root/capsule/code/beh_ephys_analysis')
 from aind_dynamic_foraging_data_utils.nwb_utils import load_nwb_from_filename
 from utils.beh_functions import get_session_tbl, get_unit_tbl, session_dirs, parseSessionID
+from utils.ephys_functions import load_drift
+from utils.capsule_migration import capsule_directories
 from utils.pupil_utils import load_pupil
 from pathlib import Path
 from hdmf.common import DynamicTable, VectorData
@@ -82,6 +85,7 @@ ISO8601_DURATION = re.compile(
 # Load column mappings and descriptions
 COLUMN_MAP_PATH = '/root/capsule/code/data_management/column_names_map.json'
 COLUMN_DESC_PATH = '/root/capsule/code/data_management/column_names_description.json'
+
 
 # Fiber photometry: per-subject surgery records (region -> implant hemisphere), used to
 # label photometry acquisitions by brain region instead of channel index.
@@ -809,6 +813,85 @@ def spike_times_are_samples(spike_times_col):
     return span > MAX_PLAUSIBLE_SESSION_SECONDS, span
 
 
+ANTIDROMIC_FOCUSES = ['PrL', 'S1']
+ANTIDROMIC_COLS = ['antidromic_tier_1', 'antidromic_tier_2', 'antidromic_latency',
+                   'antidromic_jitter', 'p_antidromic', 'p_collision']
+
+
+def _load_antidromic(session_id, data_type='curated'):
+    """Load per-session antidromic results, mirroring antidromic_generation.py.
+
+    Processes only the focuses in ANTIDROMIC_FOCUSES ('PrL', 'S1'), flattens
+    MultiIndex columns per focus, negates t_collision, computes tier_1/tier_2,
+    then takes the OR (max) across focuses per unit and selects best-focus metrics
+    by highest t_collision (after negation).
+
+    Returns a DataFrame indexed by unit_id with columns in ANTIDROMIC_COLS,
+    or None if the file does not exist (no antidromic analysis was performed).
+    """
+    session_dir = session_dirs(session_id)
+    path = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session_id}_antidromic_results.pkl')
+    if not os.path.exists(path):
+        return None
+
+    with open(path, 'rb') as f:
+        anti_df = pickle.load(f)
+
+    if anti_df is None or len(anti_df) == 0:
+        return None
+
+    all_focus_dfs = []
+    for focus in ANTIDROMIC_FOCUSES:
+        site = f'surface_{focus}'
+        if isinstance(anti_df.columns, pd.MultiIndex):
+            cols = [col for col in anti_df.columns if col[1] in (site, '')]
+            df = anti_df.loc[:, cols].copy()
+            df.columns = df.columns.get_level_values(0)
+        else:
+            df = anti_df.copy()
+
+        if 'p_antidromic' not in df.columns:
+            continue
+
+        df = df.copy()
+        df['t_collision'] = -df['t_collision']  # flip sign, matching generation script
+
+        df['antidromic_tier_1'] = (
+            (df['jitter'] < 0.01)
+            & (df['p_antidromic'] < 0.005)
+            & (df['t_antidromic'] > 0)
+            & (df['p_collision'] < 0.005)
+            & (df['t_collision'] > 0)
+        ).astype(float)
+        df['antidromic_tier_2'] = (
+            (df['jitter'] < 0.01)
+            & (df['p_antidromic'] < 0.005)
+            & (df['t_antidromic'] > 0)
+        ).astype(float)
+        df['focus'] = focus
+        all_focus_dfs.append(df)
+
+    if not all_focus_dfs:
+        return None
+
+    combined = pd.concat(all_focus_dfs, ignore_index=True)
+    id_col = 'unit_id' if 'unit_id' in combined.columns else 'unit'
+
+    # OR of tiers across focuses (max = 1 if any focus passes)
+    tier_max = combined.groupby(id_col)[['antidromic_tier_1', 'antidromic_tier_2']].max().reset_index()
+
+    # Best-focus metrics: focus with highest t_collision after negation
+    combined['_tcol'] = combined['t_collision'].fillna(-np.inf)
+    idx_best = combined.groupby(id_col)['_tcol'].idxmax()
+    keep = [c for c in ['antidromic_latency', 'jitter', 'p_antidromic', 'p_collision'] if c in combined.columns]
+    best = combined.loc[idx_best, [id_col] + keep].copy().rename(columns={'jitter': 'antidromic_jitter'})
+
+    result = tier_max.merge(best, on=id_col, how='left')
+    if id_col != 'unit_id':
+        result = result.rename(columns={id_col: 'unit_id'})
+    return result
+
+
 def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
     """
     Merge unit tables from custom pickle and NWB kilosort data.
@@ -926,6 +1009,76 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         merged_df[mapped_name] = nwb_aligned[orig_col].values
 
     logger.info(f"Merged table has {len(merged_df)} rows and {len(merged_df.columns)} columns")
+
+    # 5. Add drift analysis columns (sd, ephys_cut_start, ephys_cut_end)
+    import ast as _ast
+    drift_tbl = load_drift(session_id, unit_id=None, data_type=data_type)
+    if drift_tbl is not None and len(drift_tbl) > 0:
+        sd_values = []
+        cut_start_values = []
+        cut_end_values = []
+        for unit_id in custom_aligned['unit_id'].values:
+            if unit_id in drift_tbl['unit_id'].values:
+                row = drift_tbl[drift_tbl['unit_id'] == unit_id].iloc[0]
+                sd_values.append(row.get('sd/mean_updated', np.nan))
+                try:
+                    cut = row.get('ephys_cut', None)
+                    if isinstance(cut, str):
+                        cut = _ast.literal_eval(cut)
+                    if cut is not None and len(cut) == 2:
+                        s = cut[0] if cut[0] is not None and not (isinstance(cut[0], float) and np.isnan(cut[0])) else np.nan
+                        e = cut[1] if cut[1] is not None and not (isinstance(cut[1], float) and np.isnan(cut[1])) else np.nan
+                    else:
+                        s, e = np.nan, np.nan
+                except Exception:
+                    s, e = np.nan, np.nan
+                cut_start_values.append(s)
+                cut_end_values.append(e)
+            else:
+                sd_values.append(np.nan)
+                cut_start_values.append(np.nan)
+                cut_end_values.append(np.nan)
+        merged_df['firing_rate_stability'] = sd_values
+        merged_df['ephys_cut_start'] = cut_start_values
+        merged_df['ephys_cut_end'] = cut_end_values
+        logger.info(f"Added drift columns (firing_rate_stability, ephys_cut_start, ephys_cut_end) for {len(drift_tbl)} units")
+    else:
+        logger.info(f"No drift data found for {session_id}, skipping drift columns")
+
+    # 6. Add antidromic classification columns (NaN if no antidromic analysis was performed)
+    anti_tbl = _load_antidromic(session_id, data_type=data_type)
+    if anti_tbl is not None and len(anti_tbl) > 0:
+        anti_tbl = anti_tbl.set_index('unit_id')
+        for col in ANTIDROMIC_COLS:
+            merged_df[col] = [
+                anti_tbl.loc[uid, col] if uid in anti_tbl.index else np.nan
+                for uid in custom_aligned['unit_id'].values
+            ]
+        logger.info(f"Added antidromic columns for {len(anti_tbl)} units")
+    else:
+        for col in ANTIDROMIC_COLS:
+            merged_df[col] = np.nan
+        logger.info(f"No antidromic data found for {session_id}, filling antidromic columns with NaN")
+
+    # 7. Compute opto_NE_paper: True if the unit appears in the ACF CSV output of
+    #    acg_generation.py, which was filtered by basic_ephys_all criteria.
+    try:
+        capsule_dirs = capsule_directories()
+        acf_csv = os.path.join(capsule_dirs['manuscript_fig_prep_dir'], 'acg',
+                               'acf_fit_parameters_with_pcs.csv')
+        if os.path.exists(acf_csv):
+            acf_df = pd.read_csv(acf_csv, usecols=['session', 'unit_id'])
+            acf_df['unit_id'] = acf_df['unit_id'].astype(str)
+            passed = set(acf_df[acf_df['session'] == session_id]['unit_id'].values)
+            unit_ids_str = custom_aligned['unit_id'].astype(str)
+            merged_df['opto_NE_paper'] = unit_ids_str.isin(passed).values
+            logger.info(f"opto_NE_paper: {merged_df['opto_NE_paper'].sum()} / {len(merged_df)} units pass (from ACF CSV)")
+        else:
+            merged_df['opto_NE_paper'] = False
+            logger.warning(f"ACF CSV not found at {acf_csv}, opto_NE_paper set to False")
+    except Exception as e:
+        merged_df['opto_NE_paper'] = False
+        logger.warning(f"Could not load ACF CSV for opto_NE_paper: {e}")
 
     # Drop the whole table when the sorter left spike times as sample indices: rescaling
     # them here would guess at a sampling rate, and passing them through would silently
