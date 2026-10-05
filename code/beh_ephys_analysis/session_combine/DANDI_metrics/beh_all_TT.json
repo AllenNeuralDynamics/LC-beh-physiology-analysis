@@ -1,0 +1,65 @@
+{
+  "isi_violations_ratio": {
+    "bounds": [
+      0.0,
+      0.1
+    ]
+  },
+  "maximum_increase_of_p(response_cond_laser)": {
+    "bounds": [
+      0.55,
+      1.0
+    ]
+  },
+  "spike_latency_at_maximum_p(response_cond_laser)": {
+    "bounds": [
+      0.002,
+      0.02
+    ]
+  },
+  "waveform_euclidean_distance_at_maximum_p(response_cond_laser)": {
+    "bounds": [
+      0.0,
+      0.35
+    ]
+  },
+  "waveform_correlation_at_maximum_p(response_cond_laser)": {
+    "bounds": [
+      0.95,
+      1.0
+    ]
+  },
+  "default_qc": {
+    "items": [
+      true
+    ]
+  },
+  "peak": {
+    "bounds": [
+      -1000,
+      500
+    ]
+  },
+  "trial_count": {
+    "bounds": [
+      50,
+      2000
+    ]
+  },
+  "number_of_pulses_passing_in_opto_tagging": {
+    "bounds": [
+      4.5,
+      6
+    ]
+  },
+  "in_df": {
+    "items": [
+      true
+    ]
+  },
+  "probe": {
+    "items": [
+      "tt"
+    ]
+  }
+}

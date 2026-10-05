@@ -1,0 +1,32 @@
+{
+    "session_len": {
+      "bounds": [
+        90,
+        null
+      ]
+    },
+    "p_sw_L": {
+      "bounds": [
+        0.04,
+        null
+      ]
+    },
+    "aN": {
+      "bounds": [
+        0.15,
+        null
+      ]
+    },
+    "diff_1": {
+      "bounds": [
+        0,
+        null
+      ]
+    },
+    "bias": {
+      "bounds": [
+        -1.25,
+        1.25
+      ]
+    }
+  }
