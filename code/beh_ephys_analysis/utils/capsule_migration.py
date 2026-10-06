@@ -44,7 +44,7 @@ def capsule_directories():
         - data_dir: Raw data directory
     """
     root = capsule_root()
-    output_dir = root / 'scratch' / 'results'
+    output_dir = root / 'data' / 'results'
     dirs = {
         'output_dir': output_dir,
         'manuscript_fig_dir': output_dir / 'manuscript' / 'figures',

@@ -1024,7 +1024,8 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
                 try:
                     cut = row.get('ephys_cut', None)
                     if isinstance(cut, str):
-                        cut = _ast.literal_eval(cut)
+                        # CSV stores e.g. '[nan, 7168500]'; literal_eval rejects bare 'nan'
+                        cut = _ast.literal_eval(cut.replace('nan', 'None'))
                     if cut is not None and len(cut) == 2:
                         s = cut[0] if cut[0] is not None and not (isinstance(cut[0], float) and np.isnan(cut[0])) else np.nan
                         e = cut[1] if cut[1] is not None and not (isinstance(cut[1], float) and np.isnan(cut[1])) else np.nan
@@ -1043,7 +1044,9 @@ def merge_unit_tables(session_id, data_type='curated', return_nwb=False):
         merged_df['ephys_cut_end'] = cut_end_values
         logger.info(f"Added drift columns (firing_rate_stability, ephys_cut_start, ephys_cut_end) for {len(drift_tbl)} units")
     else:
-        logger.info(f"No drift data found for {session_id}, skipping drift columns")
+        for col in ['firing_rate_stability', 'ephys_cut_start', 'ephys_cut_end']:
+            merged_df[col] = np.nan
+        logger.info(f"No drift data found for {session_id}, filling drift columns with NaN")
 
     # 6. Add antidromic classification columns (NaN if no antidromic analysis was performed)
     anti_tbl = _load_antidromic(session_id, data_type=data_type)
