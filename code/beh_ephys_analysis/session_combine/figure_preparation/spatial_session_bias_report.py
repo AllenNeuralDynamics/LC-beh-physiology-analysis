@@ -15,6 +15,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from scipy.stats import rankdata
 
 sys.path.append('/root/capsule/code/beh_ephys_analysis')
 
@@ -29,6 +30,7 @@ from utils.spatial_session_bias import (
     mouse_from_session,
     session_bias_table,
     session_centroid_permutation,
+    knn_session_permutation,
     session_confound_screen,
     session_level_regression,
     within_between_regression,
@@ -59,6 +61,12 @@ BEHAVIOR_FEATURES = [
     'T_baseline_svs_hit', 'T_response_svs_hit', 'T_outcome_com_mc',
     'T_outcome_l_mc', 'T_baseline_hit_all', 'T_response_hit_all',
 ]
+# Firing / ACG features shown in basic_ephys_feature_in_space (F_basic_ephys_DRN).
+BASIC_EPHYS_FEATURES = [
+    'response_rate', 'bl_mean', 'bl_response_corr', 'pc_1', 'pc_2', 'pc_3',
+    'P1', 'P2', 'P3', 'tau1', 'tau2', 'tau3', 'response_fr',
+    'bl_response_corr_short', 'peak2', 'peak3', 'A1', 'A2', 'A3',
+]
 
 # Session-level variables that could plausibly track where the probe went. Any
 # of these present in the per-unit table gets averaged within session and
@@ -77,22 +85,41 @@ def to_bregma_mm(df):
     return X
 
 
+def rank_features(df, features):
+    """Rank-transform each feature over its non-NaN units, as F_basic_ephys_DRN does
+    before calling spatial_dependence_summary."""
+    df = df.copy()
+    for f in features:
+        v = pd.to_numeric(df[f], errors='coerce').to_numpy(float)
+        ok = np.isfinite(v)
+        r = np.full(len(v), np.nan)
+        r[ok] = rankdata(v[ok])
+        df[f] = r
+    return df
+
+
 def load_datasets():
-    """(label, per-unit table, feature list) for each dataset we have units for."""
+    """(label, per-unit table, feature list, kNN k) for each dataset we have units for.
+
+    k is the `k_neighbors` the source notebook passed to spatial_dependence_summary,
+    so the kNN statistic re-tested here is the one on the figure."""
     out = []
     wf = pd.read_csv(os.path.join(SRC_DIR, 'combined_features_waveform_low_DRN.csv'))
     out.append(('waveform_low_DRN', wf,
-                [f for f in WAVEFORM_FEATURES if f in wf.columns]))
+                [f for f in WAVEFORM_FEATURES if f in wf.columns], 30))
     beh = pd.read_pickle(os.path.join(SRC_DIR, 'features_combined_beh_all_DRN.pkl'))
     out.append(('beh_all_DRN', beh,
-                [f for f in BEHAVIOR_FEATURES if f in beh.columns]))
+                [f for f in BEHAVIOR_FEATURES if f in beh.columns], 20))
+    be = pd.read_pickle(os.path.join(SRC_DIR, 'features_combined_basic_ephys_all_DRN.pkl'))
+    be_feats = [f for f in BASIC_EPHYS_FEATURES if f in be.columns]
+    out.append(('basic_ephys_all_DRN', rank_features(be, be_feats), be_feats, 10))
     return out
 
 
 # ---------------------------------------------------------------------------
 # figure
 # ---------------------------------------------------------------------------
-def make_figure(label, df, features, table, path_no_ext):
+def make_figure(label, df, features, table, path_no_ext, knn_k):
     X = to_bregma_mm(df)
     s = df['session'].to_numpy()
     mouse = mouse_from_session(s)
@@ -275,8 +302,11 @@ def make_figure(label, df, features, table, path_no_ext):
         pm = session_centroid_permutation(X, yv, s, permutations=N_PERM, seed=SEED,
                                           strata=mouse)
         pa = pm['per_axis'].set_index('axis')
+        knn = knn_session_permutation(X, yv, s, k_neighbors=knn_k,
+                                      permutations=N_PERM, seed=SEED, strata=mouse)
         strat_rows.append({'feature': f,
                            'p_r2_within_mouse_perm': pm['p_r2_session_perm'],
+                           'p_knn_within_mouse_perm': knn['p_knn_session_perm'],
                            **{f'p_{nm}_within_mouse_perm': pa.loc[nm, 'p_session_perm']
                               for nm in names}})
     strat = pd.DataFrame(strat_rows).set_index('feature')
@@ -326,16 +356,16 @@ def make_figure(label, df, features, table, path_no_ext):
 
 def main():
     leverage_rows = []
-    for label, df, features in load_datasets():
+    for label, df, features, knn_k in load_datasets():
         print(f'\n=== {label}: {len(df)} units, {len(features)} features', flush=True)
         table = session_bias_table(
             df, features, coord_cols=CCF_COLS, bregma=BREGMA_LPS_MM,
-            permutations=N_PERM, n_boot=N_BOOT, seed=SEED)
+            permutations=N_PERM, n_boot=N_BOOT, seed=SEED, knn_k=knn_k)
         table.insert(0, 'dataset', label)
 
         lev, ins, focus, screen, strat, schemes = make_figure(
             label, df, features, table,
-            os.path.join(OUT_DIR, f'session_bias_diagnostics_{label}'))
+            os.path.join(OUT_DIR, f'session_bias_diagnostics_{label}'), knn_k)
 
         # fold the within-mouse null into the main stat table
         table = table.merge(strat, on='feature', how='left')

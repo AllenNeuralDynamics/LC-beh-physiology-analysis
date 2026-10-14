@@ -62,11 +62,15 @@ warnings.filterwarnings('ignore')
 verbose = 0
 # %%
 # load basic ephys
-target_folder = f'{capsule_dirs["manuscript_fig_prep_dir"]}/acg'
+# version 'DRN' reads basic_ephys_DRN.pkl and writes to acg_DRN/ (see basic_ephys_generation.py)
+# run: python acg_generation.py [DRN]
+version = sys.argv[1] if len(sys.argv) > 1 else ''
+out_suffix = f'_{version}' if version else ''
+target_folder = f'{capsule_dirs["manuscript_fig_prep_dir"]}/acg{out_suffix}'
 if not os.path.exists(target_folder):
     os.makedirs(target_folder, exist_ok=True)
 be_folder = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'basic_ephys')
-be_file = os.path.join(be_folder, f'basic_ephys.pkl')
+be_file = os.path.join(be_folder, f'basic_ephys{out_suffix}.pkl')
 with open(be_file, 'rb') as f:
     basic_ephys_df = pickle.load(f)
 filter = basic_ephys_df['be_filter'].values

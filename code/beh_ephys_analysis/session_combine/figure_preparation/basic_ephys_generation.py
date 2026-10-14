@@ -22,7 +22,7 @@ import re
 from utils.beh_functions import session_dirs, parseSessionID, load_model_dv, makeSessionDF, get_session_tbl, get_unit_tbl, get_history_from_nwb
 from utils.ephys_functions import correlate_nan, autocorrelation, load_trial_drift, load_drift, get_spike_matrix
 from utils.ccf_utils import ccf_pts_convert_to_mm, pir_to_lps
-from utils.combine_tools import apply_qc
+from utils.combine_tools import apply_qc, to_str_intlike
 from utils.capsule_migration import capsule_directories
 import pickle
 import scipy.stats as stats
@@ -56,7 +56,12 @@ capsule_dirs = capsule_directories()
 # # Load criteria and data
 
 # %%
-criteria_name = 'basic_ephys'
+# version '' -> basic_ephys.pkl with criteria basic_ephys (default)
+# version 'DRN' -> basic_ephys_DRN.pkl with criteria basic_ephys_all_DRN, matching F_basic_ephys_DRN
+# run: python basic_ephys_generation.py [DRN]
+version = sys.argv[1] if len(sys.argv) > 1 else ''
+criteria_name = {'': 'basic_ephys', 'DRN': 'basic_ephys_all_DRN'}[version]
+out_suffix = f'_{version}' if version else ''
 
 # %%
 # load constraints and data
@@ -65,6 +70,19 @@ with open(os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'combined_unit_t
     
 with open(os.path.join('/root/capsule/code/beh_ephys_analysis/session_combine/metrics', f'{criteria_name}.json'), 'r') as f:
     constraints = json.load(f)
+if version == 'DRN':
+    # same as F_basic_ephys_DRN: sd is relaxed there, and the isi bound is
+    # conditional on antidromic tier_1, which is not in combined_unit_tbl
+    constraints['sd'] = [0, 1]
+    antidromic_file = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'antidromic_analysis', 'PrL_S1', 'combined_antidromic_results.pkl')
+    with open(antidromic_file, 'rb') as f:
+        antidromic_df = pickle.load(f)
+    antidromic_df = antidromic_df[['session', 'unit', 'tier_1']].copy()
+    antidromic_df['unit_key'] = antidromic_df['unit'].apply(to_str_intlike)
+    combined_tagged_units['unit_key'] = combined_tagged_units['unit'].apply(to_str_intlike)
+    combined_tagged_units = combined_tagged_units.merge(
+        antidromic_df[['session', 'unit_key', 'tier_1']], on=['session', 'unit_key'], how='left').drop(columns='unit_key')
+    combined_tagged_units['tier_1'] = combined_tagged_units['tier_1'].fillna(False)
 target_folder = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'basic_ephys')
 if not os.path.exists(target_folder):
     os.makedirs(target_folder)
@@ -1426,9 +1444,9 @@ basic_ephys_df.rename(columns={'probe_x': 'probe'}, inplace=True)
 
 # %%
 # save basic ephys data
-with open(os.path.join(target_folder, f'basic_ephys.pkl'), 'wb') as f:
+with open(os.path.join(target_folder, f'basic_ephys{out_suffix}.pkl'), 'wb') as f:
     pickle.dump(basic_ephys_df, f)
-print(f'Saved basic ephys data to {os.path.join(target_folder, f"basic_ephys.pkl")}')
+print(f'Saved basic ephys data to {os.path.join(target_folder, f"basic_ephys{out_suffix}.pkl")}')
 
 
 

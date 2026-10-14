@@ -1,0 +1,61 @@
+{
+  "isi_violations": {
+    "conditional": [
+      {
+        "if": { "tier_1": ["==", true] },
+        "bounds": [0, 0.20]
+      },
+      {
+        "else": true,
+        "bounds": [0, 0.1]
+      }
+    ]
+  },
+  "p_max": {
+    "bounds": [
+      0.5,
+      1.0
+    ]
+  },
+  "lat_max_p": {
+    "bounds": [
+      0.002,
+      0.02
+    ]
+  },
+  "eu": {
+    "bounds": [
+      0.0,
+      0.4
+    ]
+  },
+  "corr": {
+    "bounds": [
+      0.9,
+      1.0
+    ]
+  },
+  "qc_pass": {
+    "items": [
+      true
+    ]
+  },
+  "peak":{
+    "bounds": [
+      -1000,
+      500
+    ]
+  },
+  "sig_counts":{
+    "bounds": [
+      4.5,
+      6
+    ]
+  },
+  "sd":{
+    "bounds": [
+      0,
+      0.3
+    ]
+  }
+}

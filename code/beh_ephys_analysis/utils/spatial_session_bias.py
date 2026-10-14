@@ -18,6 +18,8 @@ estimators matched to the leverage that actually exists:
                                  within-session and between-session parts
     session_centroid_permutation restricted null: keep each session's internal layout and
                                  its feature values, shuffle which centroid it sits at
+    knn_session_permutation      the same restricted null for the kNN CV-R2 statistic,
+                                 plus a GroupKFold-by-session variant
     session_level_regression     collapse to session means (the honest between-insertion test)
     cluster_bootstrap            resample sessions or mice to get CIs on the gradient
     leave_one_group_out          jackknife influence of single sessions / mice
@@ -341,6 +343,90 @@ def session_centroid_permutation(coords, values, session, permutations=2000,
         'null_r2_session_mean': float(r2_sess.mean()),
         'null_r2_global_mean': float(r2_glob.mean()),
         'per_axis': per_axis,
+    }
+
+
+def knn_session_permutation(coords, values, session, k_neighbors=15, n_splits=5,
+                            permutations=2000, seed=0, n_jobs=-1, strata=None):
+    """Session-aware nulls for the kNN predictability statistic.
+
+    `spatial_dependence_summary` reports the 5-fold CV R2 of a distance-weighted
+    kNN regressor on 3D position (`KNN p` on the figures) against a global
+    shuffle of the feature values. This re-tests the same statistic, with the
+    same folds (`KFold(shuffle=True, random_state=seed)`) and the same k, so the
+    observed R2 matches the figure, against:
+
+      global   values shuffled across all units (the figure's null)
+      session  session centroids shuffled, as in `session_centroid_permutation`
+               (restricted to within stratum when `strata` is given)
+
+    It also reports the CV R2 with `GroupKFold` by session, so that no test unit
+    is predicted from units of its own insertion, and its p-value under the
+    session null. With KFold, a unit's nearest neighbours are mostly from its
+    own session, so the observed R2 can come from "units in the same insertion
+    have similar values" alone; GroupKFold removes that route.
+    """
+    from sklearn.model_selection import KFold, GroupKFold
+    from sklearn.neighbors import KNeighborsRegressor
+    from sklearn.metrics import r2_score
+
+    X, y, s, strat, _ = _clean(coords, values, session, strata)
+    us, idx, cent, off = _centroids(X, s)
+    n_sess = len(us)
+    sess_strat = (None if strat is None
+                  else np.array([strat[s == u][0] for u in us]))
+    folds_kfold = list(KFold(n_splits=n_splits, shuffle=True,
+                             random_state=seed).split(X))
+    folds_group = list(GroupKFold(n_splits=min(n_splits, n_sess)).split(X, groups=s))
+
+    def cv_r2(Xd, yd, folds):
+        preds = np.zeros_like(yd)
+        for tr, te in folds:
+            model = KNeighborsRegressor(n_neighbors=min(k_neighbors, len(tr)),
+                                        weights='distance')
+            model.fit(Xd[tr], yd[tr])
+            preds[te] = model.predict(Xd[te])
+        return r2_score(yd, preds)
+
+    obs_kfold = cv_r2(X, y, folds_kfold)
+    obs_group = cv_r2(X, y, folds_group)
+
+    def _permute_sessions(r):
+        if sess_strat is None:
+            return r.permutation(n_sess)
+        perm = np.arange(n_sess)
+        for lab in np.unique(sess_strat):
+            pos = np.flatnonzero(sess_strat == lab)
+            perm[pos] = pos[r.permutation(len(pos))]
+        return perm
+
+    def one(sd):
+        r = np.random.default_rng(int(sd))
+        Xp = cent[_permute_sessions(r)][idx] + off
+        yp = r.permutation(y)
+        return (cv_r2(X, yp, folds_kfold), cv_r2(Xp, y, folds_kfold),
+                cv_r2(Xp, y, folds_group))
+
+    seeds = np.random.default_rng(seed).integers(0, 2 ** 32 - 1, size=permutations)
+    try:
+        from joblib import Parallel, delayed
+        res = Parallel(n_jobs=n_jobs, prefer='processes')(delayed(one)(sd) for sd in seeds)
+    except Exception:
+        res = [one(sd) for sd in seeds]
+    null = np.asarray(res, float)
+
+    def pval(col, obs):
+        return float((np.sum(null[:, col] >= obs) + 1) / (permutations + 1))
+
+    return {
+        'n_units': int(len(y)),
+        'n_sessions': int(n_sess),
+        'k_neighbors': int(k_neighbors),
+        'r2_knn_kfold': float(obs_kfold),
+        'p_knn_global_perm': pval(0, obs_kfold),
+        'p_knn_session_perm': pval(1, obs_kfold),
+        'r2_knn_groupkfold': float(obs_group),
+        'p_knn_groupkfold_session_perm': pval(2, obs_group),
     }
 
 
@@ -719,7 +805,8 @@ def session_bias_table(df, features, coord_cols=('x_ccf', 'y_ccf', 'z_ccf'),
                        session_col='session', mouse_col=None,
                        bregma=(-5.74, 5.4, -0.45), mirror_ml=True,
                        permutations=2000, n_boot=1000, seed=0,
-                       axis_names=AXIS_NAMES, fdr_alpha=0.05, verbose=True):
+                       axis_names=AXIS_NAMES, fdr_alpha=0.05, verbose=True,
+                       knn_k=None):
     """Side-by-side naive vs session-aware statistics for many features.
 
     `df` is a per-unit table with `session_col`, `coord_cols` and the feature
@@ -730,6 +817,9 @@ def session_bias_table(df, features, coord_cols=('x_ccf', 'y_ccf', 'z_ccf'),
     within/between coefficient split for each axis. BH-FDR is applied across
     features separately for each p-value column, so the naive and corrected
     conclusions are directly comparable.
+
+    If `knn_k` is given, the kNN CV-R2 statistic is also re-tested with that k
+    (see `knn_session_permutation`); use the k the figure used.
     """
     X_all = df[list(coord_cols)].to_numpy(float) - np.asarray(bregma, float)
     if mirror_ml:
@@ -765,6 +855,11 @@ def session_bias_table(df, features, coord_cols=('x_ccf', 'y_ccf', 'z_ccf'),
             'r2_session_level': sess['r2'],
             'p_session_level_f': sess['f_pvalue'],
         }
+        if knn_k is not None:
+            knn = knn_session_permutation(X, y, s, k_neighbors=knn_k,
+                                          permutations=permutations, seed=seed)
+            rec.update({k: v for k, v in knn.items()
+                        if k.startswith(('r2_knn', 'p_knn'))})
         pa = perm['per_axis'].set_index('axis')
         sa = sess['per_axis'].set_index('axis')
         ba = bs.set_index('axis')
