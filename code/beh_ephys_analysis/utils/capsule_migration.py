@@ -51,6 +51,7 @@ def capsule_directories():
         'manuscript_fig_prep_dir': output_dir / 'manuscript' / 'prep',
         'derived_dir': root / 'data' / 'scratch_data',
         'data_dir': root / 'data',
+        'derived_dir_curr': root / 'scratch'
     }
     for dir in dirs.values():
         if not dir.exists():

@@ -1039,9 +1039,441 @@ def update_unit_tbl_by_drift(session, data_type):
     unit_tbl.to_pickle(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_metrics.pkl'))
     return unit_tbl
 
+def plot_lc_drift(session, data_type, plot=True, update_csv=False, update_cut=False):
+    """
+    Analyze and plot probe drift for neurons within the session's LC depth range.
+
+    Variant of ``plot_session_opto_drift`` with three differences:
+
+    1. **LC-range filter** — units are restricted to those whose depth falls in
+       the curated LC range (``{session}_lc_range.json`` in the current scratch
+       ``opto_dir_curated``).
+    2. **No whole-probe matrices** — drift is computed on-demand only at each
+       unit's own depth, keeping memory and wall-clock low.
+    3. **Incremental CSV** — the legacy ``opto_drift_tbl.csv`` is copied as a
+       seed; only units not already present are added.  Per-unit PDFs that already
+       exist in the legacy drift folder are also skipped.
+
+    LC range JSON semantics:
+        ``{"a": null, "b": null}`` → no LC; returns early.
+        ``{"a": X, "b": null}``   → depth ≤ X.
+        ``{"a": X, "b": Y}``      → Y ≤ depth ≤ X.
+
+    Parameters
+    ----------
+    session : str
+        Session identifier.
+    data_type : str
+        ``'curated'`` or ``'raw'``.
+    plot : bool, optional
+        Whether to save per-unit drift figures (default: True).
+    update_csv : bool, optional
+        Whether to write the merged drift CSV (default: False).
+    update_cut : bool, optional
+        Re-apply ephys-cut edits from an existing drift CSV (default: False).
+
+    Returns
+    -------
+    pd.DataFrame
+        Drift metrics table for the processed LC units.
+    """
+    caps = capsule_directories()
+
+    # --- directories -----------------------------------------------------------
+    sd_curr = session_dirs(session, scratch_dir=caps['derived_dir_curr'])
+    sd_leg  = session_dirs(session, scratch_dir=caps['derived_dir'])
+    sd_def  = session_dirs(session)   # stream_name, postprocessed_dir, etc.
+
+    drift_dir_new    = os.path.join(sd_curr[f'opto_dir_{data_type}'], 'drift')
+    drift_dir_legacy = os.path.join(sd_leg[f'opto_dir_{data_type}'],  'drift')
+    os.makedirs(drift_dir_new, exist_ok=True)
+
+    # --- read LC range ---------------------------------------------------------
+    lc_json = os.path.join(sd_curr[f'opto_dir_{data_type}'],
+                           f'{session}_lc_range.json')
+    if not os.path.exists(lc_json):
+        print(f'[lc_drift] No LC range JSON for {session}, skipping.')
+        return pd.DataFrame()
+    with open(lc_json) as f:
+        lc = json.load(f).get('lc_range', {})
+    lc_a, lc_b = lc.get('a'), lc.get('b')
+    if lc_a is None:
+        print(f'[lc_drift] LC range not set (a=null) for {session}, skipping.')
+        return pd.DataFrame()
+
+    def in_lc(depth):
+        if lc_b is None:
+            return depth <= lc_a
+        return lc_b <= depth <= lc_a
+
+    # --- motion info -----------------------------------------------------------
+    motion_root = str(caps['data_dir']) + f'/{session}_sorted/preprocessed/motion/'
+    if not os.path.exists(motion_root):
+        print(f'[lc_drift] No motion info for {session}, skipping.')
+        return pd.DataFrame()
+    motion_path = os.path.join(motion_root, sd_def['stream_name'])
+    all_files   = os.listdir(motion_path)
+    motion_info = load_legacy_motion_info(motion_path) \
+                  if 'motion.npy' in all_files \
+                  else load_motion_info(motion_path)
+
+    # --- timing ----------------------------------------------------------------
+    bin_sampling = 10
+    bin_short    = 100
+    bin_long     = 300
+    qm_dir = os.path.join(sd_def['processed_dir'], f'{session}_qm.json')
+    with open(qm_dir) as f:
+        qm_dict = json.load(f)
+    start, stop = qm_dict['ephys_cut'][0], qm_dict['ephys_cut'][1]
+    map_time = motion_info['motion'].temporal_bins_s
+    if (np.abs(np.mean(map_time[0]) - 0.5*(start+stop)) > 10*60) \
+            or map_time[0][0] in (0.5, 1.0):
+        mis_align = -start if map_time[0][0] in (0.5, 1.0) \
+                    else map_time[0][0] - start
+    else:
+        mis_align = 0
+
+    temp_bins_sampling = np.arange(start + mis_align, stop + mis_align, bin_sampling)
+    temp_bins           = np.arange(start, stop, bin_short)
+    temp_bins_slow      = temp_bins
+    temp_bins_sampling  = temp_bins_sampling - mis_align   # reset to behaviour time
+
+    # --- unit data -------------------------------------------------------------
+    unit_tbl = get_unit_tbl(session, data_type)
+    if unit_tbl is None:
+        print(f'[lc_drift] No unit table for {session}, skipping.')
+        return pd.DataFrame()
+    sa = si.load(sd_def[f'postprocessed_dir_{data_type}'], load_extensions=False)
+    unit_locations   = sa.get_extension('unit_locations').get_data(outputs='by_unit')
+    spike_amplitudes = sa.get_extension('spike_amplitudes').get_data(outputs='by_unit')[0]
+    del sa
+
+    # --- seed CSV from legacy --------------------------------------------------
+    csv_new    = os.path.join(sd_curr[f'opto_dir_{data_type}'],
+                              f'{session}_opto_drift_tbl.csv')
+    csv_legacy = os.path.join(sd_leg[f'opto_dir_{data_type}'],
+                              f'{session}_opto_drift_tbl.csv')
+    if os.path.exists(csv_new):
+        opto_drift_tbl = pd.read_csv(csv_new, index_col=0)
+    elif os.path.exists(csv_legacy):
+        opto_drift_tbl = pd.read_csv(csv_legacy, index_col=0)
+        print('[lc_drift] Seeded drift CSV from legacy location.')
+    else:
+        opto_drift_tbl = pd.DataFrame()
+    already_in_csv = set(opto_drift_tbl['unit_id'].values) \
+                     if 'unit_id' in opto_drift_tbl.columns else set()
+    opto_drift_tbl_exist = opto_drift_tbl.copy() if update_cut else None
+
+    # --- opto reference times (for plot lines) ---------------------------------
+    pre_end = post_start = None
+    opto_csv = os.path.join(sd_def[f'opto_dir_{data_type}'],
+                            f'{session}_opto_session.csv')
+    if os.path.exists(opto_csv):
+        odf = pd.read_csv(opto_csv)
+        t_pre  = odf.query('pre_post == "pre"')['time'].values
+        t_post = odf.query('pre_post == "post"')['time'].values
+        if len(t_pre)  > 0: pre_end    = np.max(t_pre)
+        if len(t_post) > 0: post_start = np.min(t_post)
+
+    # --- filter units to LC range + ISI quality --------------------------------
+    units_lc = [row['unit_id'] for _, row in unit_tbl.iterrows()
+                if in_lc(unit_locations[row['unit_id']][1])
+                and row['isi_violations_ratio'] < 0.5]
+    print(f'[lc_drift] {session}: {len(units_lc)} LC units (isi<0.5) '
+          f'(a={lc_a}, b={lc_b}) / {len(unit_tbl)} total')
+
+    # --- per-unit drift function (depth-local: no full-probe matrices) ---------
+    def process_unit(unit_id):
+        depth          = unit_locations[unit_id][1]
+        spike_times    = unit_tbl[unit_tbl['unit_id'] == unit_id]['spike_times'].values[0]
+        spike_amp      = spike_amplitudes[unit_id]
+
+        # --- drift at this unit's depth only ---
+        d_samp = np.array([
+            motion_info['motion'].get_displacement_at_time_and_depth([t + mis_align], [depth])[0]
+            for t in temp_bins_sampling])
+
+        drift_fast = np.full(len(temp_bins), np.nan)
+        for i, t in enumerate(temp_bins):
+            ci = np.where((temp_bins_sampling >= t - bin_short/2) &
+                          (temp_bins_sampling <  t + bin_short/2))[0]
+            if ci.size > 0: drift_fast[i] = np.mean(d_samp[ci])
+
+        drift_slow_u = drift_sp = drift_slow_pre_u = drift_slow_post_u = None
+        drift_slow_u     = np.full(len(temp_bins_slow), np.nan)
+        drift_slow_pre_u = np.full(len(temp_bins_slow), np.nan)
+        drift_slow_post_u= np.full(len(temp_bins_slow), np.nan)
+        for i, t in enumerate(temp_bins_slow):
+            ci = np.where((temp_bins_sampling >= t - bin_long/2) &
+                          (temp_bins_sampling <= t + bin_long/2))[0]
+            if ci.size > 0: drift_slow_u[i] = np.mean(d_samp[ci])
+            ci = np.where((temp_bins_sampling >= t - bin_long) &
+                          (temp_bins_sampling <  t))[0]
+            if ci.size > 0: drift_slow_pre_u[i] = np.mean(d_samp[ci])
+            ci = np.where((temp_bins_sampling >  t) &
+                          (temp_bins_sampling <= t + bin_long))[0]
+            if ci.size > 0: drift_slow_post_u[i] = np.mean(d_samp[ci])
+
+        # --- firing rate ---
+        temp_bins_spike = np.concatenate([[temp_bins[0] - bin_short/2],
+                                          temp_bins + bin_short/2])
+        spike_counts_fast, _ = np.histogram(spike_times, bins=temp_bins_spike)
+        spike_counts_fast = spike_counts_fast / bin_short
+        spike_counts_slow_u     = np.full(len(temp_bins_slow), np.nan)
+        spike_counts_slow_pre_u = np.full(len(temp_bins_slow), np.nan)
+        spike_counts_slow_post_u= np.full(len(temp_bins_slow), np.nan)
+        for i, t in enumerate(temp_bins_slow):
+            if t - bin_long > temp_bins[0]:
+                spike_counts_slow_pre_u[i]  = np.sum((spike_times >= t-bin_long) & (spike_times < t)) / bin_long
+            if t + bin_long < temp_bins[-1]:
+                spike_counts_slow_post_u[i] = np.sum((spike_times >= t) & (spike_times < t+bin_long)) / bin_long
+            if t - bin_long/2 > temp_bins[0] and t + bin_long/2 < temp_bins[-1]:
+                spike_counts_slow_u[i] = np.sum((spike_times >= t-bin_long/2) &
+                                                  (spike_times < t+bin_long/2)) / bin_long
+
+        # --- amplitude ---
+        amp_fast = amp_slow = amp_slow_pre = amp_slow_post = None
+        amp_fast      = np.full(len(temp_bins),      np.nan)
+        amp_slow      = np.full(len(temp_bins),      np.nan)
+        amp_slow_pre  = np.full(len(temp_bins_slow), np.nan)
+        amp_slow_post = np.full(len(temp_bins_slow), np.nan)
+        for i, t in enumerate(temp_bins):
+            for arr, lo, hi in [(amp_fast, t-bin_short, t+bin_short),
+                                 (amp_slow, t-bin_long/2, t+bin_long/2)]:
+                inds = np.where((spike_times >= lo) & (spike_times < hi))[0]
+                if inds.size > 5:
+                    v = spike_amp[inds]; c = np.percentile(v, [5,95])
+                    v = v[(v>=c[0])&(v<=c[1])]
+                    if v.size > 0: arr[i] = np.mean(v)
+        for i, t in enumerate(temp_bins_slow):
+            for arr, lo, hi in [
+                    (amp_slow_pre,  t-bin_long-bin_short, t-bin_short),
+                    (amp_slow_post, t+bin_short,           t+bin_short+bin_long)]:
+                inds = np.where((spike_times >= lo) & (spike_times < hi))[0]
+                if inds.size > 5:
+                    v = spike_amp[inds]; c = np.percentile(v, [5,95])
+                    v = v[(v>=c[0])&(v<=c[1])]
+                    if v.size > 0: arr[i] = np.mean(v)
+
+        sd = np.std(spike_counts_slow_u[~np.isnan(spike_counts_slow_u)]) \
+             / np.nanmean(spike_counts_slow_u)
+
+        # ephys_cut
+        ephys_cut = [None, None]
+        if update_cut and opto_drift_tbl_exist is not None:
+            er = opto_drift_tbl_exist.query('unit_id == @unit_id')
+            if len(er) > 0:
+                nan = None; ephys_cut = eval(er['ephys_cut'].values[0])
+
+        # sd after cut
+        sc_cut = spike_counts_slow_u.copy(); tb_cut = temp_bins_slow.copy()
+        if ephys_cut[0] is not None:
+            m = tb_cut >= ephys_cut[0]; sc_cut = sc_cut[m]; tb_cut = tb_cut[m]
+        if ephys_cut[1] is not None:
+            m = tb_cut <= ephys_cut[1]; sc_cut = sc_cut[m]
+        sd_cut = (np.std(sc_cut[~np.isnan(sc_cut)]) / np.nanmean(sc_cut)) \
+                 if len(sc_cut) >= 2 else np.nan
+
+        # regressions
+        X_slow   = np.column_stack((drift_slow_u, amp_slow))
+        z_slow   = spike_counts_slow_u
+        ni_slow  = np.where(~np.isnan(z_slow) & np.all(~np.isnan(X_slow), axis=1))[0]
+        r2_slow  = r2_slow_upd = np.nan
+        m_slow   = None
+        if len(ni_slow) >= 2:
+            m_slow = LinearRegression().fit(X_slow[ni_slow], z_slow[ni_slow])
+            r2_slow = m_slow.score(X_slow[ni_slow], z_slow[ni_slow])
+            r2_slow_upd = r2_slow
+
+        z_daf = np.abs((spike_counts_fast - spike_counts_slow_pre_u) /
+                        (0.5*(spike_counts_fast + spike_counts_slow_pre_u)))
+        X_daf = np.abs(np.column_stack((
+            drift_fast - drift_slow_pre_u,
+            amp_fast - amp_slow_pre,
+            (drift_fast - drift_slow_pre_u) * spike_counts_slow_u)))
+        ni_daf = np.where(~np.isnan(z_daf) & np.all(~np.isnan(X_daf), axis=1))[0]
+
+        z_das = np.abs(spike_counts_slow_post_u - spike_counts_slow_pre_u) / \
+                (0.5*(spike_counts_slow_post_u + spike_counts_slow_pre_u))
+        X_das = np.column_stack((
+            np.abs(drift_slow_post_u - drift_slow_pre_u),
+            np.abs(amp_slow_post - amp_slow_pre),
+            np.abs(drift_slow_post_u - drift_slow_pre_u) * spike_counts_slow_u))
+        ni_das = np.where(~np.isnan(z_das) & np.all(~np.isnan(X_das), axis=1))[0]
+
+        def _fit(X, z, ni):
+            if len(ni) < 2:
+                nc = X.shape[1]
+                return np.nan, np.nan, np.full(nc, np.nan), np.full(nc, np.nan), z, z
+            rf = RandomForestRegressor(n_estimators=10, random_state=42).fit(X[ni], z[ni])
+            lr = LinearRegression().fit(X[ni], z[ni])
+            return (r2_score(z[ni], rf.predict(X[ni])),
+                    lr.score(X[ni], z[ni]),
+                    rf.feature_importances_, lr.coef_,
+                    rf.predict(X[ni]), lr.predict(X[ni]))
+
+        r2rf_daf, r2lr_daf, imp_daf, coef_daf, zrf_daf, zlr_daf = _fit(X_daf, z_daf, ni_daf)
+        r2rf_das, r2lr_das, imp_das, coef_das, zrf_das, zlr_das = _fit(X_das, z_das, ni_das)
+
+        if plot:
+            plt.rcParams.update({'font.size': 8})
+            fig = plt.figure(figsize=(20, 20))
+            gs  = gridspec.GridSpec(5, 3)
+
+            def vlines(ax_):
+                if pre_end    is not None: ax_.axvline(pre_end,    color='r', ls='--', lw=2)
+                if post_start is not None: ax_.axvline(post_start, color='b', ls='--', lw=2)
+                if ephys_cut[0] is not None: ax_.axvline(ephys_cut[0], color='g', ls='--', lw=2)
+                if ephys_cut[1] is not None: ax_.axvline(ephys_cut[1], color='g', ls='--', lw=2)
+
+            ax = plt.subplot(gs[0, 0]); plt.hist(spike_times, bins=temp_bins)
+            vlines(ax); plt.title('Firing rate')
+
+            ax = plt.subplot(gs[1, 0])
+            plt.plot(temp_bins, spike_counts_fast, label='fast')
+            plt.plot(temp_bins_slow, spike_counts_slow_u, label='slow', c='r')
+            plt.legend(); vlines(ax)
+
+            ax = plt.subplot(gs[2, 0])
+            plt.plot(temp_bins,      (spike_counts_fast - spike_counts_slow_pre_u) /
+                                     (0.5*(spike_counts_fast + spike_counts_slow_pre_u)), label='fast-slow')
+            plt.plot(temp_bins_slow, (spike_counts_slow_post_u - spike_counts_slow_pre_u) /
+                                     (0.5*(spike_counts_slow_pre_u + spike_counts_slow_post_u)),
+                     c='r', label='diff(slow)')
+            plt.legend()
+
+            ax = plt.subplot(gs[3, 0])
+            plt.plot(temp_bins,      np.abs((spike_counts_fast - spike_counts_slow_pre_u) /
+                                            (0.5*(spike_counts_fast + spike_counts_slow_pre_u))), label='abs(fast-slow)')
+            plt.plot(temp_bins_slow, np.abs((spike_counts_slow_post_u - spike_counts_slow_pre_u) /
+                                             (0.5*(spike_counts_slow_pre_u + spike_counts_slow_post_u))),
+                     c='r', label='abs(diff(slow))')
+            plt.legend()
+
+            ax = plt.subplot(gs[1, 1])
+            plt.plot(temp_bins,      drift_fast,        label='fast')
+            plt.plot(temp_bins_slow, drift_slow_u,      label='slow', c='r')
+            plt.plot(temp_bins,      np.zeros(len(temp_bins)), 'k--')
+            plt.legend(); vlines(ax); plt.title(f'Motion at {depth:.0f} µm')
+
+            ax = plt.subplot(gs[2, 1])
+            plt.plot(temp_bins,      drift_fast - drift_slow_pre_u,      label='fast-slow')
+            plt.plot(temp_bins_slow, drift_slow_post_u - drift_slow_u,   label='diff(slow)', c='r')
+            plt.legend()
+
+            ax = plt.subplot(gs[3, 1])
+            plt.plot(temp_bins,      np.abs(drift_fast - drift_slow_pre_u),      label='abs(fast-slow)')
+            plt.plot(temp_bins_slow, np.abs(drift_slow_post_u - drift_slow_u),   label='abs(diff(slow))', c='r')
+            plt.legend()
+
+            ax = plt.subplot(gs[0, 2])
+            plt.scatter(spike_times, spike_amp, c='k', s=0.5, alpha=0.25)
+            vlines(ax); plt.title('Spike amplitude')
+
+            ax = plt.subplot(gs[1, 2])
+            plt.plot(temp_bins, amp_fast,  label='fast')
+            plt.plot(temp_bins, amp_slow,  label='slow', c='r')
+            plt.legend()
+
+            ax = plt.subplot(gs[2, 2])
+            plt.plot(temp_bins,      amp_fast - amp_slow_pre,      label='fast-slow')
+            plt.plot(temp_bins_slow, amp_slow_post - amp_slow_pre, label='diff(slow)', c='r')
+            plt.legend()
+
+            ax = plt.subplot(gs[3, 2])
+            plt.plot(temp_bins,      np.abs(amp_fast - amp_slow_pre),      label='abs(fast-slow)')
+            plt.plot(temp_bins_slow, np.abs(amp_slow_post - amp_slow_pre), label='abs(diff(slow))', c='r')
+            plt.legend()
+
+            gsm = gridspec.GridSpecFromSubplotSpec(1, 5, gs[4, :])
+            ax = plt.subplot(gsm[0])
+            plt.plot(temp_bins, z_slow, label='data', c='r')
+            if m_slow is not None:
+                plt.plot(temp_bins[ni_slow], m_slow.predict(X_slow[ni_slow]), label='LR', c='b')
+            plt.legend(); plt.xlabel('Time (s)')
+            plt.title(f'Slow FR R²={r2_slow:.2f}' + (f' upd={r2_slow_upd:.2f}' if update_cut else ''))
+
+            ax = plt.subplot(gsm[1])
+            plt.plot(temp_bins, z_das, label='data', c='r')
+            if len(ni_das) >= 2:
+                plt.plot(temp_bins[ni_das], zrf_das, label='RF', c='g')
+                plt.plot(temp_bins[ni_das], zlr_das, label='LR', c='b')
+            plt.legend(); plt.xlabel('Time (s)')
+            plt.title(f'Slow |diff| LR={r2lr_das:.2f} RF={r2rf_das:.2f}')
+
+            ax = plt.subplot(gsm[2])
+            plt.plot(temp_bins, z_daf, label='data', c='r')
+            if len(ni_daf) >= 2:
+                plt.plot(temp_bins[ni_daf], zrf_daf, label='RF', c='g')
+                plt.plot(temp_bins[ni_daf], zlr_daf, label='LR', c='b')
+            plt.legend(); plt.xlabel('Time (s)')
+            plt.title(f'Fast |diff| LR={r2lr_daf:.2f} RF={r2rf_daf:.2f}')
+
+            ax = plt.subplot(gsm[4])
+            plt.hist(spike_counts_slow_u, bins=20, alpha=0.5, color='r')
+            plt.title(f'SD/mean={sd:.2f}'); plt.xlabel('FR')
+
+            plt.suptitle(f'{unit_id}  depth={depth:.1f} µm  LC a={lc_a} b={lc_b}')
+
+        return {'unit_id': unit_id,
+                'r_squared_slow': r2_slow,
+                'r_squared_diff_abs_slow_lr': r2lr_das,
+                'r_squared_diff_abs_fast_lr': r2lr_daf,
+                'r_squared_diff_abs_slow_rf': r2rf_das,
+                'r_squared_diff_abs_fast_rf': r2rf_daf,
+                'sd/mean': sd,
+                'sd/mean_updated': sd_cut,
+                'importances_diff_abs_slow': imp_das,
+                'importances_diff_abs_fast': imp_daf,
+                'coeffs_diff_abs_slow': coef_das,
+                'coeffs_diff_abs_fast': coef_daf,
+                'regressors': ['drift', 'amplitude', 'drift*fr'],
+                'ephys_cut': ephys_cut,
+                'drift_unit': False,
+                'r_squared_slow_corrected': r2_slow_upd}
+
+    # --- main loop over LC units -----------------------------------------------
+    new_rows = []
+    for unit_id in units_lc:
+        if os.path.exists(os.path.join(drift_dir_legacy, f'{unit_id}_drift.pdf')) \
+                and unit_id in already_in_csv:
+            print(f'  [skip] unit {unit_id} (already in legacy drift)')
+            continue
+        row_dict = process_unit(unit_id)
+        new_rows.append(row_dict)
+        if plot:
+            plt.savefig(os.path.join(drift_dir_new, f'{unit_id}_drift.pdf'))
+            plt.close()
+
+    # --- merge and save --------------------------------------------------------
+    if new_rows:
+        new_df = pd.DataFrame(new_rows)
+        opto_drift_tbl = pd.concat([opto_drift_tbl, new_df], ignore_index=True)
+        if update_cut and opto_drift_tbl_exist is not None:
+            for ind, row in opto_drift_tbl.iterrows():
+                uid = row['unit_id']
+                er  = opto_drift_tbl_exist.query('unit_id == @uid')
+                if len(er) > 0:
+                    nan = None
+                    opto_drift_tbl.at[ind, 'ephys_cut'] = eval(er['ephys_cut'].values[0])
+                    opto_drift_tbl.at[ind, 'drift_unit'] = er['drift_unit'].values[0]
+
+    if update_csv and len(opto_drift_tbl) > 0:
+        opto_drift_tbl.to_csv(csv_new)
+        print(f'[lc_drift] Saved → {csv_new}')
+
+    if plot and new_rows:
+        merged = os.path.join(sd_curr[f'opto_dir_{data_type}'],
+                              f'{session}_lc_drift.pdf')
+        combine_pdf_big(drift_dir_new, merged)
+        print(f'[lc_drift] Merged PDF → {merged}')
+
+    return opto_drift_tbl
+
+
 if __name__ == '__main__':
     # session_assets = pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv')
-    session_assets = pd.read_csv(CAPSULE_ROOT + '/code/data_management/hopkins_session_assets.csv')
+    session_assets = pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv')
     session_list = session_assets['session_id'].values
     session_list = [session for session in session_list if isinstance(session, str)]
     # session = 'behavior_716325_2024-05-31_10-31-14'
@@ -1052,14 +1484,14 @@ if __name__ == '__main__':
         if get_unit_tbl(session, 'curated') is not None:
             # try:
             print(session)
-            plot_session_opto_drift(session, 'curated', update_csv=True, plot=True, update_cut=True)
-            generate_session_opto_drift_trial_table(session, 'curated', opto_only=False, save=True)
+            plot_lc_drift(session, 'curated', update_csv=True, plot=True, update_cut=False)
+            # generate_session_opto_drift_trial_table(session, 'curated', opto_only=False, save=True)
             print(f'{session} done')
             # except:
             #     print(f'{session} error')
  
-    # Parallel(n_jobs=5)(delayed(process)(session) for session in session_list)
-    process('behavior_751004_2024-12-21_13-28-28')
+    Parallel(n_jobs=5)(delayed(process)(session) for session in session_list)
+    # process('behavior_751004_2024-12-21_13-28-28')
     # session_ind = session_list.index('behavior_ZS059_2021-04-12_14-57-43')
     # for session in session_list[session_ind:]:
     #     process(session)
