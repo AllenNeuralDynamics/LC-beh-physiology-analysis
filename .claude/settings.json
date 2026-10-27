@@ -27,7 +27,8 @@
       "Bash(xargs -a /tmp/import_only3.txt -d '\\\\n' git add --)",
       "Bash(xxd)",
       "Bash(git checkout *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(git clean *)"
     ]
   }
 }

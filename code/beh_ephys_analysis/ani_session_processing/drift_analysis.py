@@ -1050,7 +1050,7 @@ def plot_lc_drift(session, data_type, plot=True, update_csv=False, update_cut=Fa
        ``opto_dir_curated``).
     2. **No whole-probe matrices** — drift is computed on-demand only at each
        unit's own depth, keeping memory and wall-clock low.
-    3. **Incremental CSV** — the legacy ``opto_drift_tbl.csv`` is copied as a
+    3. **Incremental CSV** — the legacy ``LC_drift_tbl.csv`` is copied as a
        seed; only units not already present are added.  Per-unit PDFs that already
        exist in the legacy drift folder are also skipped.
 
@@ -1150,9 +1150,9 @@ def plot_lc_drift(session, data_type, plot=True, update_csv=False, update_cut=Fa
 
     # --- seed CSV from legacy --------------------------------------------------
     csv_new    = os.path.join(sd_curr[f'opto_dir_{data_type}'],
-                              f'{session}_opto_drift_tbl.csv')
+                              f'{session}_LC_drift_tbl.csv')
     csv_legacy = os.path.join(sd_leg[f'opto_dir_{data_type}'],
-                              f'{session}_opto_drift_tbl.csv')
+                              f'{session}_LC_drift_tbl.csv')
     if os.path.exists(csv_new):
         opto_drift_tbl = pd.read_csv(csv_new, index_col=0)
     elif os.path.exists(csv_legacy):
