@@ -467,6 +467,7 @@ def plot_unit_beh_session(session, data_type = 'raw', align_name = 'go_cue', cur
     def process(unit_id):
         fig = plot_unit(unit_id)
         if fig is not None:
+            fig.text(0.01, 0.99, session, ha='left', va='top', fontsize=14)
             save_fig(fig, os.path.join(session_dir[f'ephys_fig_dir_{data_type}'], align_name, f'unit_{unit_id}_{align_name}'),
                      save_format=save_format)
         plt.close(fig)
