@@ -76,27 +76,27 @@ from utils.ephys_functions import *
 
 capsule_dirs = capsule_directories()
 # %%
-criteria_name = 'beh_all'
+criteria_name = 'beh_all_LC'
 version = 'PrL_S1'
 # load constraints and data
 with open(os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'combined_unit_tbl', 'combined_unit_tbl.pkl'), 'rb') as f:
     combined_tagged_units = pickle.load(f)
 combined_tagged_units['unit_id'] = combined_tagged_units['unit'].apply(to_str_intlike)
-# antidromic data
-antidromic_file = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'antidromic_analysis', version, 'combined_antidromic_results.pkl')
-with open(antidromic_file, 'rb') as f:
-    antidromic_df = pickle.load(f)
+# # antidromic data
+# antidromic_file = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'antidromic_analysis', version, 'combined_antidromic_results.pkl')
+# with open(antidromic_file, 'rb') as f:
+#     antidromic_df = pickle.load(f)
 
-antidromic_df.rename(columns={'unit': 'unit_id'}, inplace=True)
-antidromic_df['unit_id'] = antidromic_df['unit_id'].apply(to_str_intlike)
-antidromic_df = antidromic_df[['unit_id', 'session', 'p_auto_inhi', 't_auto_inhi',
-       'p_collision', 't_collision', 'p_antidromic', 't_antidromic', 'tier_1',
-       'tier_2', 'tier_1_long', 'tier_2_long']].copy()
-combined_tagged_units = combined_tagged_units.merge(antidromic_df, on=['session', 'unit_id'], how='left')
-combined_tagged_units['tier_1'].fillna(False, inplace=True)
-combined_tagged_units['tier_2'].fillna(False, inplace=True)
-combined_tagged_units['tier_1_long'].fillna(False, inplace=True)
-combined_tagged_units['tier_2_long'].fillna(False, inplace=True)   
+# antidromic_df.rename(columns={'unit': 'unit_id'}, inplace=True)
+# antidromic_df['unit_id'] = antidromic_df['unit_id'].apply(to_str_intlike)
+# antidromic_df = antidromic_df[['unit_id', 'session', 'p_auto_inhi', 't_auto_inhi',
+#        'p_collision', 't_collision', 'p_antidromic', 't_antidromic', 'tier_1',
+#        'tier_2', 'tier_1_long', 'tier_2_long']].copy()
+# combined_tagged_units = combined_tagged_units.merge(antidromic_df, on=['session', 'unit_id'], how='left')
+# combined_tagged_units['tier_1'].fillna(False, inplace=True)
+# combined_tagged_units['tier_2'].fillna(False, inplace=True)
+# combined_tagged_units['tier_1_long'].fillna(False, inplace=True)
+# combined_tagged_units['tier_2_long'].fillna(False, inplace=True)   
 with open(os.path.join(CAPSULE_ROOT + '/code/beh_ephys_analysis/session_combine/metrics', f'{criteria_name}.json'), 'r') as f:
     constraints = json.load(f)
 beh_folder = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'response_regression')
@@ -108,7 +108,7 @@ if not os.path.exists(beh_folder):
 # %%
 # start with a mask of all True
 combined_tagged_units_filtered, combined_tagged_units, fig, axes = apply_qc(combined_tagged_units, constraints)
-
+combined_tagged_units_filtered = combined_tagged_units[combined_tagged_units['selected_qc_only']].copy()
 
 # %%
 def regressors_to_formula(response_var, regressors):
@@ -154,6 +154,12 @@ def process(session, unit_id, rec_side, formula_all, formula_hit, focus_all, foc
         if unit_drift['ephys_cut'][1] is not None:
             spike_times_curr = spike_times_curr[spike_times_curr <= unit_drift['ephys_cut'][1]]
             session_df_curr = session_df_curr[session_df_curr['goCue_start_time'] <= unit_drift['ephys_cut'][1]]
+    if len(session_df_curr) == 0:
+        nan_row = np.full(len(regressors_focus_all) + len(regressors_focus_hit), np.nan)
+        return {'coefs_ratio': nan_row, 'T_ratio': nan_row, 'p_ratio': nan_row, 'r2_ratio': [np.nan, np.nan],
+                'coefs_baseline': nan_row, 'T_baseline': nan_row, 'p_baseline': nan_row, 'r2_baseline': [np.nan, np.nan],
+                'coefs_response': nan_row, 'T_response': nan_row, 'p_response': nan_row, 'r2_response': [np.nan, np.nan],
+                'session': session, 'unit': unit_id}
     if 'amp_abs' in formula_hit or 'amp' in formula_hit or 'amp_abs' in formula_all or 'amp' in formula_all:
         # get unit_trial_drift_curr's rows corresponding to the ones in session_df_curr
         session_df_curr = session_df_curr.merge(unit_trial_drift_curr, on='trial_ind', how='left').copy()

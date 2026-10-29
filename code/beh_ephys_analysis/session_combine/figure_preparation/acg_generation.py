@@ -131,6 +131,7 @@ with open(os.path.join(CAPSULE_ROOT + '/code/beh_ephys_analysis/session_combine/
     constraints = json.load(f)
     
 combined_tagged_units_filtered, combined_tagged_units, fig, axes = apply_qc(combined_tagged_units, constraints, density=density, plot_all=False)
+combined_tagged_units_filtered = combined_tagged_units[combined_tagged_units['selected_qc_only']].copy()
 combined_tagged_units.rename(columns={'unit': 'unit_id'}, inplace=True)
 combined_tagged_units['unit_id'] = combined_tagged_units['unit_id'].apply(to_str_intlike)
 combined_tagged_units_filtered.rename(columns={'unit': 'unit_id'}, inplace=True)

@@ -821,7 +821,7 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
     if update_csv:
         opto_drift_tbl.to_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_drift_tbl.csv'))
     if plot:
-        # merge_pdfs(input_dir=drift_dir, output_filename=os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_drift.pdf')) 
+        # merge_pdfs(input_dir=drift_dir, output_filename=os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_drift.pdf'))
         combine_pdf_big(drift_dir, os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_drift.pdf'))
     return opto_drift_tbl
 
@@ -1472,10 +1472,8 @@ def plot_lc_drift(session, data_type, plot=True, update_csv=False, update_cut=Fa
 
 
 if __name__ == '__main__':
-    # session_assets = pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv')
-    session_assets = pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv')
-    session_list = session_assets['session_id'].values
-    session_list = [session for session in session_list if isinstance(session, str)]
+    with open(CAPSULE_ROOT + '/code/data_management/LC_curated.txt') as _f:
+        session_list = [line.strip() for line in _f if line.strip()]
     # session = 'behavior_716325_2024-05-31_10-31-14'
     # plot_session_opto_drift(session, 'curated', update_csv=True, plot=True)
     def process(session):
@@ -1484,14 +1482,14 @@ if __name__ == '__main__':
         if get_unit_tbl(session, 'curated') is not None:
             # try:
             print(session)
-            plot_lc_drift(session, 'curated', update_csv=True, plot=True, update_cut=False)
-            # generate_session_opto_drift_trial_table(session, 'curated', opto_only=False, save=True)
+            plot_lc_drift(session, 'curated', update_csv=True, plot=True, update_cut=True)
+            generate_session_opto_drift_trial_table(session, 'curated', opto_only=False, save=True)
             print(f'{session} done')
             # except:
             #     print(f'{session} error')
  
-    Parallel(n_jobs=5)(delayed(process)(session) for session in session_list)
-    # process('behavior_751004_2024-12-21_13-28-28')
+    # Parallel(n_jobs=12)(delayed(process)(session) for session in session_list)
+    process('behavior_751004_2024-12-21_13-28-28')
     # session_ind = session_list.index('behavior_ZS059_2021-04-12_14-57-43')
     # for session in session_list[session_ind:]:
     #     process(session)
