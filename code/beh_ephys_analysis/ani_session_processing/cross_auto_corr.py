@@ -12,7 +12,7 @@ while _anchor != os.path.dirname(_anchor):
         sys.path.insert(0, _beh_ephys_root)
         break
     _anchor = os.path.dirname(_anchor)
-from utils.capsule_migration import CAPSULE_ROOT
+from utils.capsule_migration import CAPSULE_ROOT, capsule_directories
 from utils.beh_functions import parseSessionID, session_dirs, get_unit_tbl, get_session_tbl
 from utils.plot_utils import shiftedColorMap, template_reorder, get_gradient_colors
 from utils.opto_utils import opto_metrics
@@ -44,11 +44,16 @@ def cross_auto_corr(session, data_type):
     bin_short = 0.002
     win_short = 0.08
     go_cue_period = 2
-    session_dir = session_dirs(session)
-    unit_tbl = get_unit_tbl(session, data_type) 
-    if unit_tbl['LC_range_top'].unique()[0] is None and 'ZS' not in session:
-        print(f'LC range not inferred, probably no opto units in {session}. Exiting.')
+    caps = capsule_directories()
+    session_dir = session_dirs(session)                                          # input data (data/scratch_data)
+    sd_curr = session_dirs(session, scratch_dir=caps['derived_dir_curr'])        # output data (scratch/)
+    unit_tbl = get_unit_tbl(session, data_type)
+    if unit_tbl is None:
+        print(f'No unit table for {session}. Exiting.')
         return None
+    # if unit_tbl['LC_range_top'].unique()[0] is None and 'ZS' not in session:
+    #     print(f'LC range not inferred, probably no opto units in {session}. Exiting.')
+    #     return None
     session_tbl = get_session_tbl(session)
     session_qm_file = os.path.join(session_dir['processed_dir'], f'{session}_qm.json')
     with open(session_qm_file, 'r') as f:
@@ -69,21 +74,29 @@ def cross_auto_corr(session, data_type):
             rec_end = opto_tbl['time'].min()
 
     if 'ZS' not in session:
+        lc_json = os.path.join(sd_curr['opto_dir_curated'], f'{session}_lc_range.json')
+        with open(lc_json) as _f:
+            lc_range = json.load(_f).get('lc_range', {})
+        lc_top = lc_range.get('a')
+        lc_bot = lc_range.get('b')
         filter = (
             (unit_tbl['decoder_label'] != 'artifact') &
-            (unit_tbl['decoder_label'] != 'noise') &
-            (unit_tbl['isi_violations_ratio'] < 0.1) &
-            (unit_tbl['y_loc'] >= unit_tbl['LC_range_bottom'].unique()[0] - 0.1) &
-            (unit_tbl['y_loc'] <= unit_tbl['LC_range_top'].unique()[0] + 0.1)
+            (unit_tbl['isi_violations_ratio'] < 0.2) &
+            (unit_tbl['y_loc'] <= lc_top)
         )
+        if lc_bot is not None:
+            filter = filter & (unit_tbl['y_loc'] >= lc_bot)
 
         unit_ids_focus = unit_tbl[filter]['unit_id'].to_list()
     else:
         unit_ids_focus = unit_tbl['unit_id'].to_list()
     print(f'Number of units in LC range: {len(unit_ids_focus)}')
+    if len(unit_ids_focus) < 2:
+        print('Not enough target neurons.')
+    # unit_ids_focus = unit_ids_focus[:5]
 
-    cross_corr_df = pd.DataFrame(columns=['unit_1', 'unit_2', 'cross_corr_long', 'cross_corr_short', 'cross_corr_long_nogo', 'cross_corr_short_nogo', 'start', 'end', 'long_lags', 'short_lags'])
-    auto_corr_df = pd.DataFrame(columns=['unit', 'auto_corr_long', 'auto_corr_short', 'auto_corr_long_nogo', 'auto_corr_short_nogo', 'start', 'end', 'long_lags', 'short_lags'])
+    cross_corr_rows = []
+    auto_corr_rows = []
     for unit_ind_1, unit_1 in enumerate(unit_ids_focus):
         session_tbl_curr = None
         if session_tbl is not None:
@@ -122,7 +135,7 @@ def cross_auto_corr(session, data_type):
                     'short_lags': short_lags,
                     'start': start_unit_1,
                     'end': end_unit_1}
-        auto_corr_df = pd.concat([auto_corr_df, pd.DataFrame([dist_out_auto])], ignore_index=True)
+        auto_corr_rows.append(dist_out_auto)
         for unit_ind_2, unit_2 in enumerate(unit_ids_focus):
             cross_corr_long = None
             cross_corr_short = None
@@ -170,10 +183,12 @@ def cross_auto_corr(session, data_type):
                             'end': end}
                 # Append the result to the cross_corr_df dataframe
                 if cross_corr_long is not None or cross_corr_short is not None:
-                    cross_corr_df = pd.concat([cross_corr_df, pd.DataFrame([dist_out])], ignore_index=True)
+                    cross_corr_rows.append(dist_out)
+    cross_corr_df = pd.DataFrame(cross_corr_rows)
+    auto_corr_df = pd.DataFrame(auto_corr_rows)
     # Save the results to pickle files
-    cross_corr_file = os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_cross_corr.pkl')
-    auto_corr_file = os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_auto_corr.pkl')
+    cross_corr_file = os.path.join(sd_curr[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_cross_corr.pkl')
+    auto_corr_file = os.path.join(sd_curr[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_auto_corr.pkl')
     with open(cross_corr_file, 'wb') as f:
         pickle.dump(cross_corr_df, f)
     with open(auto_corr_file, 'wb') as f:
@@ -193,18 +208,27 @@ def plot_cross_auto_corr(session, data_type):
     Returns:
         None: Saves correlation matrix plots to PNG files in the session directory.
     """
+    caps = capsule_directories()
+    session_dir = session_dirs(session)
+    sd_curr = session_dirs(session, scratch_dir=caps['derived_dir_curr'])
     unit_tbl = get_unit_tbl(session, data_type)
     if unit_tbl['LC_range_top'].unique()[0] is None and 'ZS' not in session:
         print(f'LC range not inferred, probably no opto units in {session}. Exiting.')
         return None
     if 'ZS' not in session:
+        lc_json = os.path.join(sd_curr['opto_dir_curated'], f'{session}_lc_range.json')
+        with open(lc_json) as _f:
+            lc_range = json.load(_f).get('lc_range', {})
+        lc_top = lc_range.get('a')
+        lc_bot = lc_range.get('b')
         filter = (
             (unit_tbl['decoder_label'] != 'artifact') &
             (unit_tbl['decoder_label'] != 'noise') &
             (unit_tbl['isi_violations_ratio'] < 0.1) &
-            (unit_tbl['y_loc'] >= unit_tbl['LC_range_bottom'].unique()[0] - 0.1) &
-            (unit_tbl['y_loc'] <= unit_tbl['LC_range_top'].unique()[0] + 0.1)
+            (unit_tbl['y_loc'] <= lc_top + 0.1)
         )
+        if lc_bot is not None:
+            filter = filter & (unit_tbl['y_loc'] >= lc_bot - 0.1)
 
         unit_ids_focus = unit_tbl[filter]['unit_id'].to_list()
     else:
@@ -239,13 +263,14 @@ def plot_cross_auto_corr(session, data_type):
             else:
                 cross_corr_units = cross_corr.load_units(unit_1, unit_2)
                 if cross_corr_units is not None:
-                    ax.plot(cross_corr_units['long_lags'], cross_corr_units['cross_corr_long'], label='Long', color='blue')
-                    ax.plot(cross_corr_units['long_lags'], cross_corr_units['cross_corr_long_nogo'], label='Long Nogo', color='lightblue')
-                    # ax.plot(cross_corr['short_lags'], cross_corr['cross_corr_short'], label='Short', color='orange')
+                    if cross_corr_units['cross_corr_long'] is not None:
+                        ax.plot(cross_corr_units['long_lags'], cross_corr_units['cross_corr_long'], label='Long', color='blue')
+                        ax.plot(cross_corr_units['long_lags'], cross_corr_units['cross_corr_long_nogo'], label='Long Nogo', color='lightblue')
                     ax.set_title(f'{unit_1}-{unit_2}')
                     ax.set_ylabel(f'{unit_2}')
-                    ax_short.plot(cross_corr_units['short_lags'], cross_corr_units['cross_corr_short'], label='Short', color='blue')
-                    ax_short.plot(cross_corr_units['short_lags'], cross_corr_units['cross_corr_short_nogo'], label='Short Nogo', color='lightblue')
+                    if cross_corr_units['cross_corr_short'] is not None:
+                        ax_short.plot(cross_corr_units['short_lags'], cross_corr_units['cross_corr_short'], label='Short', color='blue')
+                        ax_short.plot(cross_corr_units['short_lags'], cross_corr_units['cross_corr_short_nogo'], label='Short Nogo', color='lightblue')
                     ax_short.set_title(f'{unit_1}-{unit_2}')
                     ax_short.set_ylabel(f'{unit_2}')
                     # ax.legend()
@@ -274,61 +299,40 @@ def plot_cross_auto_corr(session, data_type):
 
     fig.tight_layout()
     fig_short.tight_layout()
-    fig.savefig(fname=os.path.join(session_dirs(session)[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_long_corr.png'))
-    fig_short.savefig(fname=os.path.join(session_dirs(session)[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_short_corr.png'))
+    fig.savefig(fname=os.path.join(sd_curr[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_long_corr.png'))
+    fig_short.savefig(fname=os.path.join(sd_curr[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_short_corr.png'))
 
 # %%
 # cross_auto_corr('ecephys_713854_2024-03-08_14-54-25', 'curated')
 if __name__ == '__main__':
 
 # %%
-    dfs = [pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv'),
-            pd.read_csv(CAPSULE_ROOT + '/code/data_management/hopkins_session_assets.csv')]
-    session_assets = pd.concat(dfs)
-    session_list = session_assets['session_id']
-    probe_list = session_assets['probe']
-    probe_list = [probe for probe, session in zip(probe_list, session_list) if isinstance(session, str)]
-    session_list = [session for session in session_list if isinstance(session, str)]    
+    session_assets = pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv')
+    session_list = [s for s in session_assets['session_id'] if isinstance(s, str)]
     from joblib import Parallel, delayed
     data_type = 'curated'
-    def process(session, data_type): 
+    def process(session, data_type):
         print(f'Starting {session}')
-        session_dir = session_dirs(session)
-        # if os.path.exists(os.path.join(session_dir['beh_fig_dir'], f'{session}.nwb')):
-        print(session_dir[f'curated_dir_{data_type}'])
-        if session_dir[f'curated_dir_{data_type}'] is not None:
-            if os.path.exists(os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_long_corr.png')):
+        caps = capsule_directories()
+        session_dir = session_dirs(session)                                       # data/scratch_data: curated data check
+        sd_curr = session_dirs(session, scratch_dir=caps['derived_dir_curr'])     # scratch/: output file check and saves
+        if session_dir is not None and session_dir[f'curated_dir_{data_type}'] is not None:
+            if sd_curr is not None and os.path.exists(os.path.join(sd_curr[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_long_corr.png')):
                 print(f'Cross correlation already computed for {session}. Skipping.')
                 return None
-            else:
-            # try:
-            # plot_ephys_probe(session, data_type=data_type, probe=probe) 
-                try:
-                    cross_auto_corr(session, data_type);
-                    plot_cross_auto_corr(session, data_type);
-                    plt.close('all')
-                    print(f'Finished {session}')
-                except Exception as e:
-                    print(f'Error processing {session}: {e}')
-                    plt.close('all')
-        # except:
-            # print(f'Error processing {session}')
-            # plt.close('all')
-        else: 
-            print(f'No curated data found for {session}') 
-        # elif session\_dir['curated_dir_raw'] is not None:
-        #     data_type = 'raw' 
-        #     opto_tagging_df_sess = opto_plotting_session(session, data_type, target, resp_thresh=resp_thresh, lat_thresh=lat_thresh, target_unit_ids= None, plot = True, save=True)
-    # Parallel(n_jobs=10, backend='loky')(
-    #     delayed(process)(session, data_type) 
-    #     for session in session_list
-    # )
+            try:
+                cross_auto_corr(session, data_type)
+                plot_cross_auto_corr(session, data_type)
+                plt.close('all')
+                print(f'Finished {session}')
+            except Exception as e:
+                print(f'Error processing {session}: {e}')
+                plt.close('all')
+        else:
+            print(f'No curated data found for {session}')
 
-    # process('ecephys_687697_2023-09-15_12-36-06', data_type)
-    # for session, probe in zip(session_list, probe_list):
-    #     process(session, data_type, probe)
-    #     plt.close('all')
-    cross_auto_corr('behavior_751004_2024-12-21_13-28-28', data_type)
+    Parallel(n_jobs=5)(delayed(process)(session, data_type) for session in session_list)
+    # cross_auto_corr('behavior_751004_2024-12-21_13-28-28', 'curated')
 
 
 

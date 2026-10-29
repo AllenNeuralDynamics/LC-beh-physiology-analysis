@@ -28,7 +28,9 @@
       "Bash(xxd)",
       "Bash(git checkout *)",
       "Bash(git fetch *)",
-      "Bash(git clean *)"
+      "Bash(git clean *)",
+      "Bash(git -C /root/capsule stash list)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

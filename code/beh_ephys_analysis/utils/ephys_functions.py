@@ -13,8 +13,10 @@ import matplotlib.pyplot as plt
 # from aind_ephys_utils import align
 try:
     from .beh_functions import session_dirs
+    from .capsule_migration import capsule_directories
 except ImportError:
     from beh_functions import session_dirs
+    from capsule_migration import capsule_directories
 from aind_dynamic_foraging_data_utils.nwb_utils import load_nwb_from_filename
 import ast
 import json
@@ -392,6 +394,10 @@ def convert_values(value):
 def load_drift(session, unit_id, data_type='curated'):
     session_dir = session_dirs(session)
     drift_file = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_drift_tbl.csv')
+    if not os.path.exists(drift_file):
+        caps = capsule_directories()
+        session_dir = session_dirs(session, scratch_dir=caps['derived_dir_curr'])
+        drift_file = os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_LC_drift_tbl.csv')
     if not os.path.exists(drift_file):
         return None
     else:
@@ -835,7 +841,8 @@ class load_auto_corr():
     def __init__(self, session, data_type):
         self.session = session
         """Initialize the object with a DataFrame."""
-        session_dir = session_dirs(session)
+        caps = capsule_directories()
+        session_dir = session_dirs(session, scratch_dir=caps['derived_dir_curr']) 
         auto_corr_tbl_dir = os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_auto_corr.pkl')
         if not os.path.exists(auto_corr_tbl_dir):
             auto_corr_data = None
@@ -876,7 +883,9 @@ class load_cross_corr():
     def __init__(self, session, data_type):
         """Initialize the object with a DataFrame."""
         self.session = session
-        session_dir = session_dirs(session)
+        caps = capsule_directories()
+        session_dir = session_dirs(session, scratch_dir=caps['derived_dir_curr']) 
+        # session_dir = session_dirs(session)
         cross_corr_tbl_dir = os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], f'{session}_{data_type}_cross_corr.pkl')
         if not os.path.exists(cross_corr_tbl_dir):
             cross_corr_data = None
@@ -900,23 +909,26 @@ class load_cross_corr():
                     unit_cross_corr_data = unit_cross_corr_data.copy()
                     unit_cross_corr_data['unit_1'] = unit_2
                     unit_cross_corr_data['unit_2'] = unit_1
-                    unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_long'] = np.array(np.flip(unit_cross_corr_data['cross_corr_long'].values[0], axis=0))
-                    unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_short'] = np.array(np.flip(unit_cross_corr_data['cross_corr_short'].values[0], axis=0))
-                    unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_long_nogo'] = np.array(np.flip(unit_cross_corr_data['cross_corr_long_nogo'].values[0], axis=0))
-                    unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_short_nogo'] = np.array(np.flip(unit_cross_corr_data['cross_corr_short_nogo'].values[0], axis=0))
+                    idx = unit_cross_corr_data.index[0]
+                    for col in ['cross_corr_long', 'cross_corr_short', 'cross_corr_long_nogo', 'cross_corr_short_nogo']:
+                        v = unit_cross_corr_data[col].values[0]
+                        if v is not None:
+                            unit_cross_corr_data.at[idx, col] = np.array(np.flip(v, axis=0))
             elif len(unit_cross_corr_data) == 1:
                 unit_cross_corr_data = unit_cross_corr_data.copy()
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_long'] = np.array(unit_cross_corr_data['cross_corr_long'].values[0])
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_short'] = np.array(unit_cross_corr_data['cross_corr_short'].values[0])
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_long_nogo'] = np.array(unit_cross_corr_data['cross_corr_long_nogo'].values[0])
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_short_nogo'] = np.array(unit_cross_corr_data['cross_corr_short_nogo'].values[0])
+                idx = unit_cross_corr_data.index[0]
+                for col in ['cross_corr_long', 'cross_corr_short', 'cross_corr_long_nogo', 'cross_corr_short_nogo']:
+                    v = unit_cross_corr_data[col].values[0]
+                    if v is not None:
+                        unit_cross_corr_data.at[idx, col] = np.array(v)
             else:
                 print(f"Multiple cross-correlation entries found for units {unit_1} and {unit_2}. Please check the data.")
                 unit_cross_corr_data = unit_cross_corr_data.iloc[[0]].copy()
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_long'] = np.array(unit_cross_corr_data['cross_corr_long'].values[0])
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_short'] = np.array(unit_cross_corr_data['cross_corr_short'].values[0])
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_long_nogo'] = np.array(unit_cross_corr_data['cross_corr_long_nogo'].values[0])
-                unit_cross_corr_data.at[unit_cross_corr_data.index[0], 'cross_corr_short_nogo'] = np.array(unit_cross_corr_data['cross_corr_short_nogo'].values[0])
+                idx = unit_cross_corr_data.index[0]
+                for col in ['cross_corr_long', 'cross_corr_short', 'cross_corr_long_nogo', 'cross_corr_short_nogo']:
+                    v = unit_cross_corr_data[col].values[0]
+                    if v is not None:
+                        unit_cross_corr_data.at[idx, col] = np.array(v)
         return unit_cross_corr_data.to_dict(orient='records')[0] if unit_cross_corr_data is not None else None
     
     def plot_units(self, unit_1, unit_2):

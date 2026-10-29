@@ -83,7 +83,7 @@ capsule_dirs = capsule_directories()
 # # Load criteria and data
 
 # %%
-criteria_name = 'basic_ephys'
+criteria_name = 'basic_ephys_all_LC'
 
 # %%
 # load constraints and data

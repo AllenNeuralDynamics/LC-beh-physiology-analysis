@@ -114,6 +114,24 @@ def process_session(session, beh, rec_side, probe, sex, target='soma'):
 
     session_opto_sig = load_opto_sig(session, data_type=data_type)
 
+    # --- LC range from scratch folder ---
+    sd_curr = session_dirs(session, scratch_dir=capsule_dirs['derived_dir_curr'])
+    lc_json = os.path.join(sd_curr['opto_dir_curated'], f'{session}_lc_range.json')
+    if os.path.exists(lc_json):
+        with open(lc_json) as _f:
+            _lc = json.load(_f).get('lc_range', {})
+        lc_top = _lc.get('a')
+        lc_bot = _lc.get('b')
+        if lc_top is not None:
+            in_lc = unit_tbl['y_loc'] <= lc_top
+            if lc_bot is not None:
+                in_lc = in_lc & (unit_tbl['y_loc'] >= lc_bot)
+        else:
+            in_lc = pd.Series([False] * len(unit_tbl))
+    else:
+        in_lc = pd.Series([False] * len(unit_tbl))
+    in_lc_list = in_lc.tolist()
+
     # --- basic derived columns ---
     if 'p_max' not in unit_tbl.columns:
         p_max = unit_tbl['p_max_x'].tolist()
@@ -317,6 +335,7 @@ def process_session(session, beh, rec_side, probe, sex, target='soma'):
         'rec_side': rec_side,
         'top': top,
         'bottom': bottom,
+        'in_LC': in_lc_list,
         'tag_loc': tag_loc,
         'fr': fr,
         'decoder': decoder,
