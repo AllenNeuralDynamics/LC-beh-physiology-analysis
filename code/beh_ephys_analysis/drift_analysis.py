@@ -84,7 +84,15 @@ def load_legacy_motion_info(folder):
     return motion_info
 
 # %%
-def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, update_cut = True):
+def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, update_cut = True, unit_ids = None, out_dir = None):
+    """Per-unit drift summary plots and drift metrics.
+
+    By default plots the session's tagged units (opto_pass & default_qc) into opto_dir/drift,
+    replacing that folder. unit_ids: plot these units instead, taken from the full unit table.
+    out_dir: write the per-unit PDFs here (and the combined PDF next to it) without touching
+    opto_dir/drift, the session drift PDFs or the drift table; use with update_cut=False and
+    update_csv=False for units that are not in the existing drift table.
+    """
     session_dir = session_dirs(session)
 
     # %%
@@ -314,10 +322,12 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
 
 
     # plt.tight_layout()
-    plt.savefig(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_motion_drift.pdf'))
+    if out_dir is None:  # the session motion plot already exists from the default run
+        plt.savefig(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_motion_drift.pdf'))
+    plt.close('all')
 
     # %%
-    unit_tbl = get_unit_tbl(session, data_type)
+    unit_tbl = get_unit_tbl(session, data_type, summary=unit_ids is None)
 
 
     # %%
@@ -479,34 +489,47 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
         else:
             r_squared_updated = r_squared
         
-        ## random forest model for fast dynamics
+        # units with too few spikes leave no complete windows to fit; their drift metrics are
+        # NaN, the plots are still drawn
+        if len(nan_inds_abs_fast) >= 2:
+            ## random forest model for fast dynamics
+            model_rf_fast = RandomForestRegressor(n_estimators=10, random_state=42)
+            model_rf_fast.fit(X_diff_abs_fast[nan_inds_abs_fast], z_diff_abs_fast[nan_inds_abs_fast])
+            z_pred_rf_diff_abs_fast = model_rf_fast.predict(X_diff_abs_fast[nan_inds_abs_fast])
+            r2_rf_diff_abs_fast = r2_score(z_diff_abs_fast[nan_inds_abs_fast], z_pred_rf_diff_abs_fast)
+            importances_diff_abs_fast = model_rf_fast.feature_importances_
 
-        model_rf_fast = RandomForestRegressor(n_estimators=10, random_state=42)
-        model_rf_fast.fit(X_diff_abs_fast[nan_inds_abs_fast], z_diff_abs_fast[nan_inds_abs_fast])
-        z_pred_rf_diff_abs_fast = model_rf_fast.predict(X_diff_abs_fast[nan_inds_abs_fast])
-        r2_rf_diff_abs_fast = r2_score(z_diff_abs_fast[nan_inds_abs_fast], z_pred_rf_diff_abs_fast)
-        importances_diff_abs_fast = model_rf_fast.feature_importances_
-           
-        ## random forest mode for slow dynamics
-        model_rf_slow = RandomForestRegressor(n_estimators=10, random_state=42)
-        model_rf_slow.fit(X_diff_abs_slow[nan_inds_diff_abs_slow], z_diff_abs_slow[nan_inds_diff_abs_slow])
-        z_pred_rf_diff_abs_slow = model_rf_slow.predict(X_diff_abs_slow[nan_inds_diff_abs_slow])
-        r2_rf_diff_abs_slow = r2_score(z_diff_abs_slow[nan_inds_diff_abs_slow], z_pred_rf_diff_abs_slow)
-        importances_diff_abs_slow = model_rf_slow.feature_importances_
+            ## linear regression with for fast dynamics
+            model_fast = LinearRegression()
+            model_fast.fit(X_diff_abs_fast[nan_inds_abs_fast], z_diff_abs_fast[nan_inds_abs_fast])
+            z_pred_fast = model_fast.predict(X_diff_abs_fast[nan_inds_abs_fast])
+            r2_diff_abs_fast = model_fast.score(X_diff_abs_fast[nan_inds_abs_fast], z_diff_abs_fast[nan_inds_abs_fast])
+            coeffs_diff_abs_fast = model_fast.coef_
+        else:
+            print(f'{session} {unit_id} too few spikes for the fast drift fits.')
+            z_pred_rf_diff_abs_fast = z_pred_fast = np.full(len(nan_inds_abs_fast), np.nan)
+            r2_rf_diff_abs_fast = r2_diff_abs_fast = np.nan
+            importances_diff_abs_fast = coeffs_diff_abs_fast = np.full(X_diff_abs_fast.shape[1], np.nan)
 
-        ## linear regression for slow dynamics
-        model_slow_diff = LinearRegression()
-        model_slow_diff.fit(X_diff_abs_slow[nan_inds_diff_abs_slow], z_diff_abs_slow[nan_inds_diff_abs_slow])
-        z_pred_diff_abs_slow = model_slow_diff.predict(X_diff_abs_slow[nan_inds_diff_abs_slow])
-        r2_diff_abs_slow = model_slow_diff.score(X_diff_abs_slow[nan_inds_diff_abs_slow], z_diff_abs_slow[nan_inds_diff_abs_slow])
-        coeffs_diff_abs_slow = model_slow_diff.coef_
+        if len(nan_inds_diff_abs_slow) >= 2:
+            ## random forest mode for slow dynamics
+            model_rf_slow = RandomForestRegressor(n_estimators=10, random_state=42)
+            model_rf_slow.fit(X_diff_abs_slow[nan_inds_diff_abs_slow], z_diff_abs_slow[nan_inds_diff_abs_slow])
+            z_pred_rf_diff_abs_slow = model_rf_slow.predict(X_diff_abs_slow[nan_inds_diff_abs_slow])
+            r2_rf_diff_abs_slow = r2_score(z_diff_abs_slow[nan_inds_diff_abs_slow], z_pred_rf_diff_abs_slow)
+            importances_diff_abs_slow = model_rf_slow.feature_importances_
 
-        ## linear regression with for fast dynamics
-        model_fast = LinearRegression()
-        model_fast.fit(X_diff_abs_fast[nan_inds_abs_fast], z_diff_abs_fast[nan_inds_abs_fast])
-        z_pred_fast = model_fast.predict(X_diff_abs_fast[nan_inds_abs_fast])
-        r2_diff_abs_fast = model_fast.score(X_diff_abs_fast[nan_inds_abs_fast], z_diff_abs_fast[nan_inds_abs_fast])
-        coeffs_diff_abs_fast = model_fast.coef_
+            ## linear regression for slow dynamics
+            model_slow_diff = LinearRegression()
+            model_slow_diff.fit(X_diff_abs_slow[nan_inds_diff_abs_slow], z_diff_abs_slow[nan_inds_diff_abs_slow])
+            z_pred_diff_abs_slow = model_slow_diff.predict(X_diff_abs_slow[nan_inds_diff_abs_slow])
+            r2_diff_abs_slow = model_slow_diff.score(X_diff_abs_slow[nan_inds_diff_abs_slow], z_diff_abs_slow[nan_inds_diff_abs_slow])
+            coeffs_diff_abs_slow = model_slow_diff.coef_
+        else:
+            print(f'{session} {unit_id} too few spikes for the slow drift fits.')
+            z_pred_rf_diff_abs_slow = z_pred_diff_abs_slow = np.full(len(nan_inds_diff_abs_slow), np.nan)
+            r2_rf_diff_abs_slow = r2_diff_abs_slow = np.nan
+            importances_diff_abs_slow = coeffs_diff_abs_slow = np.full(X_diff_abs_slow.shape[1], np.nan)
 
         
         if plot: 
@@ -650,7 +673,6 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
             plt.plot(temp_bins, spike_counts_slow, label='data', c='r')
             if len(nan_inds_slow) >= 2:
                 plt.plot(temp_bins[nan_inds_slow], model.predict(X_slow[nan_inds_slow]), label='prediction', c='b')
-            plt.plot(temp_bins[nan_inds_slow], model.predict(X_slow[nan_inds_slow]), label='prediction', c='b')
             plt.legend()
             plt.xlabel('Time (s)')
             plt.title(f"Slow FR: LR R²: {r_squared:.2f}")
@@ -739,11 +761,16 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
         # quality_pass = (row['isi_violations_ratio'] < 0.5) & (row['decoder_label'] != 'noise') & (row['decoder_label'] != 'artifact')
         if row['opto_pass'] and row['default_qc']:
             units_to_plot.append(row['unit_id'])
+    if unit_ids is not None:
+        units_to_plot = list(unit_ids)
 
     # %%
-    drift_dir = os.path.join(session_dir[f'opto_dir_{data_type}'], 'drift')
-    if os.path.exists(drift_dir):
-        shutil.rmtree(drift_dir)
+    if out_dir is None:
+        drift_dir = os.path.join(session_dir[f'opto_dir_{data_type}'], 'drift')
+        if os.path.exists(drift_dir):
+            shutil.rmtree(drift_dir)
+    else:
+        drift_dir = out_dir
 
     os.makedirs(name=drift_dir, exist_ok=True)
 
@@ -756,6 +783,7 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
         if plot:
             plt.savefig(os.path.join(drift_dir, f'{unit}_drift.pdf'))
             plt.show()
+            plt.close('all')
     if update_cut:
         nan = np.nan
         for ind, row in opto_drift_tbl.iterrows():
@@ -770,7 +798,11 @@ def plot_session_opto_drift(session, data_type, plot=True, update_csv = False, u
         opto_drift_tbl.to_csv(os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_opto_drift_tbl.csv'))
     if plot:
         # merge_pdfs(input_dir=drift_dir, output_filename=os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_drift.pdf')) 
-        combine_pdf_big(drift_dir, os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_drift.pdf'))
+        if out_dir is None:
+            combine_pdf_big(drift_dir, os.path.join(session_dir[f'opto_dir_{data_type}'], f'{session}_drift.pdf'))
+        else:
+            combine_pdf_big(drift_dir, os.path.join(os.path.dirname(os.path.normpath(drift_dir)),
+                                                    f'{session}_{os.path.basename(os.path.normpath(drift_dir))}.pdf'))
     return opto_drift_tbl
 
 import numpy as np

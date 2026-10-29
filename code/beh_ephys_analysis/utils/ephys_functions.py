@@ -402,14 +402,19 @@ def load_drift(session, unit_id, data_type='curated'):
             return None
         elif unit_id==None:
             return opto_drift_tbl
-        elif unit_id in opto_drift_tbl['unit_id'].values:
-            unit_drift = opto_drift_tbl[opto_drift_tbl['unit_id'] == unit_id].iloc[0].to_dict()
-            # Apply conversion
-            converted_data = {key: convert_values(val) for key, val in unit_drift.items()}
-            unit_drift = converted_data
-            return unit_drift
-        else:
-            return None
+        if unit_id not in opto_drift_tbl['unit_id'].values:
+            # non-tagged units are curated separately (unit_summary_DRN_drift_nontagged.py)
+            nontagged_file = drift_file.replace('_opto_drift_tbl.csv', '_opto_drift_tbl_nontagged.csv')
+            if not os.path.exists(nontagged_file):
+                return None
+            opto_drift_tbl = pd.read_csv(nontagged_file)
+            if unit_id not in opto_drift_tbl['unit_id'].values:
+                return None
+        unit_drift = opto_drift_tbl[opto_drift_tbl['unit_id'] == unit_id].iloc[0].to_dict()
+        # Apply conversion
+        converted_data = {key: convert_values(val) for key, val in unit_drift.items()}
+        unit_drift = converted_data
+        return unit_drift
 
 def get_spike_matrix(spike_times, align_time, pre_event=-2, post_event=2, binSize=0.2, stepSize=0.1, avoid_overlap = False, avoid_win = [0, 1.5], kernel = False, tau_rise = None, tau_decay = None):
     if kernel:
