@@ -100,6 +100,8 @@ mask = pd.Series(True, index=combined_tagged_units.index)
 
 # %%
 combined_tagged_units_filtered, combined_tagged_units, fig, axes = apply_qc(combined_tagged_units, constraints)
+# change to analyze all neurons in LC range
+combined_tagged_units_filtered = combined_tagged_units[combined_tagged_units['selected_qc_only']].copy()
 
 def process(session, unit_id, in_df):
     if session.startswith('behavior_ZS'):

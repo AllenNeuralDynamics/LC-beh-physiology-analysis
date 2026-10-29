@@ -60,8 +60,13 @@ capsule_dirs = capsule_directories()
 # Read CSVs with probe as string to match working pickle at scratch/combined/
 # Working file has dtype:object with values '2', 'tt', 'opto' (all strings)
 dfs = [pd.read_csv(CAPSULE_ROOT + '/code/data_management/session_assets.csv', dtype={'probe': str}),
-        pd.read_csv(CAPSULE_ROOT + '/code/data_management/hopkins_session_assets.csv', dtype={'probe': str})]
+        # pd.read_csv(CAPSULE_ROOT + '/code/data_management/hopkins_session_assets.csv', dtype={'probe': str})
+        ]
 df = pd.concat(dfs).reset_index(drop=True)
+# keep the rows where the session_id exist in /root/capsule/code/data_management/LC_curated.txt
+with open(CAPSULE_ROOT + '/code/data_management/LC_curated.txt') as f:
+    curated_sessions = set(line.strip() for line in f if line.strip())
+df = df[df['session_id'].isin(curated_sessions)]
 
 # remove those are not strings
 df = df[df['session_id'].apply(lambda x: isinstance(x, str))]
