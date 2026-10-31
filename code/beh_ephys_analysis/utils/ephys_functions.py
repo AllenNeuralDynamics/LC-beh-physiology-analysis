@@ -602,7 +602,8 @@ def regression_rwd(spike_counts, outcome, trials_back = [0, 2], sub_selection = 
 class load_trial_drift:
     def __init__(self, session, data_type):
         """Initialize the object with a DataFrame."""
-        session_dir = session_dirs(session)
+        caps = capsule_directories()
+        session_dir = session_dirs(session, scratch_dir=caps['derived_dir_curr']) 
         drift_tbl_dir = os.path.join(session_dir[f'ephys_dir_{data_type}'], f'{session}_drift_trial_table.csv')
         if not os.path.exists(drift_tbl_dir):
             drift_data = None

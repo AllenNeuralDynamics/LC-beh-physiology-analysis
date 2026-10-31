@@ -81,9 +81,9 @@ warnings.filterwarnings('ignore')
 capsule_dirs = capsule_directories()
 
 # %%
-criteria_name = 'beh_all'
-version = 'PrL_S1'
-overview = False
+criteria_name = 'beh_all_LC'
+# version = 'PrL_S1'
+overview = True
 
 # %%
 # load constraints and data
@@ -94,20 +94,20 @@ with open(os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'combined_sessio
     combined_session_qc = pickle.load(f)
 
 # antidromic data
-antidromic_file = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'antidromic_analysis', version, 'combined_antidromic_results.pkl')
-with open(antidromic_file, 'rb') as f:
-    antidromic_df = pickle.load(f)
+# antidromic_file = os.path.join(capsule_dirs["manuscript_fig_prep_dir"], 'antidromic_analysis', version, 'combined_antidromic_results.pkl')
+# with open(antidromic_file, 'rb') as f:
+#     antidromic_df = pickle.load(f)
 
-antidromic_df.rename(columns={'unit': 'unit_id'}, inplace=True)
-antidromic_df['unit_id'] = antidromic_df['unit_id'].apply(to_str_intlike)
-antidromic_df = antidromic_df[['unit_id', 'session', 'p_auto_inhi', 't_auto_inhi',
-       'p_collision', 't_collision', 'p_antidromic', 't_antidromic', 'tier_1',
-       'tier_2', 'tier_1_long', 'tier_2_long']].copy()
-combined_tagged_units = combined_tagged_units.merge(antidromic_df, on=['session', 'unit_id'], how='left')
-combined_tagged_units['tier_1'].fillna(False, inplace=True)
-combined_tagged_units['tier_2'].fillna(False, inplace=True)
-combined_tagged_units['tier_1_long'].fillna(False, inplace=True)
-combined_tagged_units['tier_2_long'].fillna(False, inplace=True)
+# antidromic_df.rename(columns={'unit': 'unit_id'}, inplace=True)
+# antidromic_df['unit_id'] = antidromic_df['unit_id'].apply(to_str_intlike)
+# antidromic_df = antidromic_df[['unit_id', 'session', 'p_auto_inhi', 't_auto_inhi',
+#        'p_collision', 't_collision', 'p_antidromic', 't_antidromic', 'tier_1',
+#        'tier_2', 'tier_1_long', 'tier_2_long']].copy()
+# combined_tagged_units = combined_tagged_units.merge(antidromic_df, on=['session', 'unit_id'], how='left')
+# combined_tagged_units['tier_1'].fillna(False, inplace=True)
+# combined_tagged_units['tier_2'].fillna(False, inplace=True)
+# combined_tagged_units['tier_1_long'].fillna(False, inplace=True)
+# combined_tagged_units['tier_2_long'].fillna(False, inplace=True)
 
 
 with open(os.path.join(CAPSULE_ROOT + '/code/beh_ephys_analysis/session_combine/metrics', f'{criteria_name}.json'), 'r') as f:

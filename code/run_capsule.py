@@ -230,17 +230,17 @@ def run(check_only: bool = False, update_timing: bool = False) -> int:
             save_timing_csv(script_timings, prep_csv_path, "prep_script")
             print(f"  → Updated timing report: {prep_csv_path}", flush=True)
 
-    notebook_csv_path = MANUSCRIPT_FIG_DIR / "timing_report.csv"
+    # notebook_csv_path = MANUSCRIPT_FIG_DIR / "timing_report.csv"
 
-    for idx, notebook_name in enumerate(notebooks, start=1):
-        print(f"[figure {idx}/{len(notebooks)}] {notebook_name}", flush=True)
-        duration = run_notebook(notebook_name, check_only=check_only)
-        notebook_timings.append((notebook_name, duration))
+    # for idx, notebook_name in enumerate(notebooks, start=1):
+    #     print(f"[figure {idx}/{len(notebooks)}] {notebook_name}", flush=True)
+    #     duration = run_notebook(notebook_name, check_only=check_only)
+    #     notebook_timings.append((notebook_name, duration))
     
-        # Save timing after each notebook completes
-        if not check_only and update_timing:
-            save_timing_csv(notebook_timings, notebook_csv_path, "manuscript_figure")
-            print(f"  → Updated timing report: {notebook_csv_path}", flush=True)
+    #     # Save timing after each notebook completes
+    #     if not check_only and update_timing:
+    #         save_timing_csv(notebook_timings, notebook_csv_path, "manuscript_figure")
+    #         print(f"  → Updated timing report: {notebook_csv_path}", flush=True)
 
     # Print timing summary and save CSV files
     if not check_only:
