@@ -7,7 +7,7 @@
 # quality or activity.
 #
 #   tier 1: DV within the session's tagged range +/- 100 um, default_qc, ISI <= 0.1
-#   tier 2: for tagged units left unmatched by tier 1: DV range +/- 200 um, default_qc
+#   tier 2: for tagged units left unmatched by tier 1: DV range +/- 200 um, default_qc, ISI <= 0.1
 #
 # Reads the per-unit flags written by unit_summary_DRN_population_options.py.
 #
@@ -22,7 +22,7 @@ FLAGS_CSV = '/root/capsule/scratch/combined/unit_summary_DRN/population_unit_fla
 OUT_CSV = '/root/capsule/scratch/combined/unit_summary_DRN/nontagged_matched_selection.csv'
 TIERS = [  # (name, DV margin in mm, max ISI violations ratio)
     ('tier1', 0.1, 0.1),
-    ('tier2', 0.2, None),
+    ('tier2', 0.2, 0.1),  # same ISI bound as the tagged units
 ]
 XYZ = ['ML', 'AP', 'DV']
 

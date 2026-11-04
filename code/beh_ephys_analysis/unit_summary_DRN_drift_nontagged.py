@@ -29,7 +29,7 @@ from utils.beh_functions import session_dirs
 SELECTION_CSV = '/root/capsule/scratch/combined/unit_summary_DRN/nontagged_matched_selection.csv'
 REVIEW_DIR = '/root/capsule/scratch/combined/unit_summary_DRN/drift_nontagged_review'
 DATA_TYPE = 'raw'
-KEEP_COLS = ['ephys_cut', 'drift_unit']  # hand-edited; never overwritten
+KEEP_COLS = ['ephys_cut', 'drift_unit', 'needs_review', 'replaces_unit']  # hand-edited or review state; never overwritten
 
 
 def run_session(session, rows):

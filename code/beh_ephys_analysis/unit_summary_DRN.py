@@ -76,7 +76,28 @@ PLANE_PAD = 0.4  # mm around the DR mesh shown in each plane
 SPONT_WINDOW = (-5, 5)
 SPIKE_TICK = 0.5  # raster tick height in opto block rasters, in train rows
 AMP_YLIM_SD = 2  # spike-amplitude y-axis spans mean +/- this many SD
+# session firing-rate panel: peak rate in PEAK_BIN sub-bins within each 30 s bin; bins whose
+# peak exceeds the unit's own BURST_PCT percentile of PEAK_BIN rates over the recording are
+# marked as candidate bursts. 1 s, not 50-100 ms: at 100 ms the peak of a 3-10 Hz unit takes
+# only 5-10 distinct values (each spike adds 10 Hz), and these units fire more regularly than
+# Poisson, so a Poisson burst test is too conservative to flag anything.
+PEAK_BIN = 1.0  # s
+BURST_PCT = 99
+PEAK_COLOR = '#e07b00'
 IN_TRIAL_PERIOD = (0, 1.5)  # lick-train starts this soon after a go cue are task licks
+# per-session CCF unit locations, newest first; _260817 is the version in the master unit table
+CCF_FILES = ['ccf_unit_locations_260817.csv', 'ccf_unit_locations.csv']
+
+# population histograms: tagged units (TAGGED_CRITERION) against the matched non-tagged units
+MASTER_CSV = '/root/capsule/scratch/combined/master_unit_tables/master_all_units_opto_ccf_raw_260817.csv'
+NONTAGGED_SELECTION = os.path.join(OUT_DIR, 'nontagged_matched_selection.csv')
+# every PSTH on a page, saved per unit for population averages (see load_population_psth)
+PSTH_DIR = os.path.join(OUT_DIR, 'psth')
+POP_CACHE = os.path.join(OUT_DIR, 'population_metrics.csv')
+POP_METRICS = [('firing_rate', 'Firing rate (Hz)', 'log'),
+               ('isi_violations_ratio', 'ISI violations ratio', 'linear'),
+               ('snr', 'SNR', 'linear'),
+               ('latency_ms', 'Latency at p_max (ms)', 'linear')]
 
 # tagging-summary columns copied onto the full unit table when the summary exists
 SUMMARY_COLS = ['p_max', 'bl_max_p', 'p_mean', 'lat_max_p', 'lat_mean', 'euc_max_p',
@@ -105,15 +126,23 @@ MESH = '#ecebe7'
 MESH_FILLS = ['#dfded8', '#f1e8d8']
 MESH_EDGE = '#b9b7b0'
 TAGGED_UNIT = '#d6402a'
-ALL_TAGGED_UNIT = '#8a8985'  # tagged units of every session
+# plane views: tagged units of every session pale red, this session's tagged units yellow
+# (dark edge so they hold up on the light mesh), other units of this session gray
+ALL_TAGGED_UNIT = '#f0a99c'
+SESSION_TAGGED_UNIT = '#f5c400'
+SESSION_TAGGED_EDGE = '#6b5500'
 SESSION_UNIT = '#cfcdc7'  # the session's untagged units, lighter so they stay behind the tagged ones
 TARGET_UNIT = '#1c5cab'
 LASER = 'red'
 TAGGED_LABEL = 'red'
-# lick side relative to the unit; blue/orange stay distinguishable under CVD
-IPSI = '#1c5cab'
-CONTRA = '#e07b00'
+# trial outcome in the lick-side panels; blue/orange stay distinguishable under CVD
+REWARDED = '#e07b00'
+UNREWARDED = '#1c5cab'
 IGNORE = INK_2
+# lick side in the spontaneous-lick panel, kept neutral so it can't be read as outcome
+SPONT_IPSI = INK
+SPONT_CONTRA = '#a9a7a1'
+NONTAGGED_POP = '#8a8985'  # population histograms: tagged in TAGGED_UNIT, non-tagged in this
 # sequential, one hue light to dark, for trial x time rate heatmaps
 HEAT_CMAP = LinearSegmentedColormap.from_list('white_to_blue', ['#ffffff', '#86b6ef', '#2a78d6', '#0d366b'])
 
@@ -217,8 +246,9 @@ def load_session_data(session, data_type='raw', target='soma', model_name=None):
     if summary_tbl is not None:
         cols = [c for c in SUMMARY_COLS if c in summary_tbl.columns and c not in unit_tbl.columns]
         unit_tbl = unit_tbl.merge(summary_tbl[['unit_id'] + cols], on='unit_id', how='left')
-    ccf_file = os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], 'ccf_unit_locations.csv')
-    if os.path.exists(ccf_file):
+    ccf_files = [os.path.join(session_dir[f'ephys_processed_dir_{data_type}'], f) for f in CCF_FILES]
+    ccf_file = next((f for f in ccf_files if os.path.exists(f)), None)
+    if ccf_file is not None:
         unit_tbl = unit_tbl.drop(columns=CCF_COLS, errors='ignore').merge(
             pd.read_csv(ccf_file)[['unit_id'] + CCF_COLS], on='unit_id', how='left')
 
@@ -311,6 +341,8 @@ def curate_unit_times(data, unit_id, curate_time=True):
     unit_drift = load_drift(data['session'], unit_id, data_type=data['data_type'])
     if curate_time and unit_drift is not None:
         ephys_cut = list(unit_drift['ephys_cut'])
+    elif curate_time:
+        ephys_cut = nontagged_drift_cut(data['session'], unit_id, data['data_type'])
     if ephys_cut[0] is not None:
         spike_times = spike_times[spike_times >= ephys_cut[0]]
         if session_df is not None:
@@ -322,6 +354,73 @@ def curate_unit_times(data, unit_id, curate_time=True):
             session_df = session_df[session_df['go_cue_time'] <= ephys_cut[1]]
             tblTrials = tblTrials[tblTrials['goCue_start_time'] <= ephys_cut[1]]
     return spike_times, session_df, tblTrials, ephys_cut
+
+
+def nontagged_drift_cut(session, unit_id, data_type='raw'):
+    """[start, end] (None = no cut) from {session}_opto_drift_tbl_nontagged.csv, the hand-placed
+    cuts of the matched non-tagged units; [None, None] if the unit is not in it."""
+    f = os.path.join(session_dirs(session)[f'opto_dir_{data_type}'], f'{session}_opto_drift_tbl_nontagged.csv')
+    if not os.path.exists(f):
+        return [None, None]
+    tbl = pd.read_csv(f, index_col=0)
+    row = tbl[tbl['unit_id'] == unit_id]
+    if len(row) == 0:
+        return [None, None]
+    parts = [x.strip() for x in str(row['ephys_cut'].iloc[0]).strip('[]').split(',')]
+    return [None if x.lower() in ('nan', 'none') else float(x) for x in parts]
+
+
+_nontagged_selection = None
+
+
+def nontagged_match(session, unit_id):
+    """Row of the matched non-tagged selection for this unit (matched_tagged_unit, distance_um,
+    ...), or None if the unit is not in it."""
+    global _nontagged_selection
+    if _nontagged_selection is None:
+        _nontagged_selection = (pd.read_csv(NONTAGGED_SELECTION) if os.path.exists(NONTAGGED_SELECTION)
+                                else pd.DataFrame(columns=['session', 'unit_id']))
+    row = _nontagged_selection[(_nontagged_selection['session'] == session)
+                               & (_nontagged_selection['unit_id'] == unit_id)]
+    return row.iloc[0] if len(row) else None
+
+
+_population = None
+
+
+def population_metrics():
+    """Firing rate, ISI violations and SNR (master unit table) and latency at the p_max
+    condition (per-condition opto table, same rule as p_max_condition) for the tagged units and
+    the matched non-tagged selection. Cached in POP_CACHE; rebuilt when either set changes."""
+    global _population
+    if _population is not None:
+        return _population
+    tagged = {k for k, v in criteria_passed().items() if TAGGED_CRITERION in v}
+    sel = pd.read_csv(NONTAGGED_SELECTION) if os.path.exists(NONTAGGED_SELECTION) else pd.DataFrame(columns=['session', 'unit_id'])
+    nontagged = set(zip(sel['session'], sel['unit_id'].astype(int)))
+    keys = tagged | nontagged
+    if os.path.exists(POP_CACHE):
+        cache = pd.read_csv(POP_CACHE)
+        if set(zip(cache['session'], cache['unit_id'])) == keys and \
+                set(zip(cache.loc[cache['tagged'], 'session'], cache.loc[cache['tagged'], 'unit_id'])) == tagged:
+            _population = cache
+            return cache
+    master = pd.read_csv(MASTER_CSV, usecols=['session', 'unit_id', 'firing_rate', 'isi_violations_ratio', 'snr'])
+    pop = pd.DataFrame(sorted(keys), columns=['session', 'unit_id']).merge(master, on=['session', 'unit_id'], how='left')
+    pop['tagged'] = [k in tagged for k in zip(pop['session'], pop['unit_id'])]
+    pop['latency_ms'] = np.nan
+    for session, rows in pop.groupby('session'):
+        metrics = _load_pickle(os.path.join(session_dirs(session)['opto_dir_raw'], f'{session}_opto_tagging_metrics.pkl'))
+        if metrics is None or 'opto_tagging_df_metrics' not in metrics:
+            continue
+        d = {'opto_metrics': metrics['opto_tagging_df_metrics']}
+        for i, unit_id in zip(rows.index, rows['unit_id']):
+            cond = p_max_condition(d, unit_id)
+            if cond is not None and pd.notna(cond['resp_lat']):
+                pop.at[i, 'latency_ms'] = 1000 * cond['resp_lat']
+    pop.to_csv(POP_CACHE, index=False)
+    _population = pop
+    return pop
 
 
 def spontaneous_licks(data, tblTrials, ephys_cut):
@@ -426,12 +525,27 @@ def ipsi_side(unit_row):
     return ('right' if ml >= 0 else 'left'), ml
 
 
+def store_psth(store, key, matrix, bin_times, align_times, **info):
+    """Keep one PSTH (trial x time rate matrix, mean, SEM) for saving with the page."""
+    if store is None:
+        return
+    matrix = np.asarray(matrix, dtype=float)
+    n = np.sum(np.isfinite(matrix), axis=0)
+    store[key] = {'bin_times': np.asarray(bin_times), 'matrix': matrix.astype(np.float32),
+                  'mean': np.nanmean(matrix, axis=0) if len(matrix) else np.full(len(bin_times), np.nan),
+                  'sem': (np.nanstd(matrix, axis=0) / np.sqrt(np.maximum(n, 1))) if len(matrix)
+                         else np.full(len(bin_times), np.nan),
+                  'n_trials': len(matrix), 'align_times': np.asarray(align_times), **info}
+
+
 def raster_psth(fig, spec, spike_times, groups, window, binSize, stepSize, title, xlabel,
-                matrices=None):
+                matrices=None, store=None, keys=None, info=None):
     """Raster stacked by group (trials in session order within a group) over one PSTH per group.
 
     groups: list of (label, align_times, color). matrices: optional list of (rate matrix,
-    bin_times) per group, for rates not computed with the default binning. Returns the PSTH axis.
+    bin_times) per group, for rates not computed with the default binning. store/keys: dict to
+    collect each group's PSTH under keys[g] (see store_psth), with info added to each entry.
+    Returns the PSTH axis.
     """
     sub = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=spec, height_ratios=[3, 1], hspace=0.08)
     ax1 = fig.add_subplot(sub[0])
@@ -451,6 +565,8 @@ def raster_psth(fig, spec, spike_times, groups, window, binSize, stepSize, title
                                                  post_event=window[1], binSize=binSize, stepSize=stepSize)
         else:
             matrix, bin_times = matrices[g]
+        if keys is not None:
+            store_psth(store, keys[g], matrix, bin_times, align_times, **(info or {}))
         plot_filled_sem(bin_times, matrix, color, ax2, f'{label} (n={len(align_times)})')
     if offset == 0:
         ax1.text(0.5, 0.5, 'No trials', ha='center', va='center', color=MUTED, transform=ax1.transAxes)
@@ -469,7 +585,7 @@ def raster_psth(fig, spec, spike_times, groups, window, binSize, stepSize, title
 
 
 def behavior_row(fig, spec, spike_times, session_df, tblTrials, spont, side, pre_event, post_event,
-                 binSize, stepSize):
+                 binSize, stepSize, store=None):
     has_q = session_df is not None and 'Qchosen' in session_df.columns
     gs = gridspec.GridSpecFromSubplotSpec(1, 11 if has_q else 10, subplot_spec=spec, wspace=0.45)
     if session_df is None or len(session_df) == 0:
@@ -513,6 +629,8 @@ def behavior_row(fig, spec, spike_times, session_df, tblTrials, spont, side, pre
                                              post_event=post_event, binSize=binSize, stepSize=stepSize)
         ax_s = fig.add_subplot(sub[1], sharex=ax)
         strips.append((ax_s, np.nanmean(matrix, axis=0), bin_times))
+        store_psth(store, f"{name.replace(' ', '_')}_all", matrix, bin_times, align_time,
+                   binSize=binSize, stepSize=stepSize, kernel=None)
         ax_s.set_xlabel(f'Time from {name} (s)')
         ax_s.set_yticks([])
     # one color scale for both strips
@@ -549,14 +667,21 @@ def behavior_row(fig, spec, spike_times, session_df, tblTrials, spont, side, pre
                    'Time from response-window end (s)')]
     for k, (col, ignore_col, name, xlabel, ignore_xlabel) in enumerate(alignments):
         t = session_df[col].values
-        for j, (is_rewarded, cond) in enumerate([(True, 'rewarded'), (False, 'unrewarded')]):
-            groups = [(ipsi_label, t[(rewarded == is_rewarded) & ipsi], IPSI),
-                      (contra_label, t[(rewarded == is_rewarded) & ~ipsi], CONTRA)]
+        align_key = 'go_cue' if k == 0 else 'response'
+        info = dict(binSize=binSize, stepSize=stepSize, kernel=None)
+        for j, (side_mask, side_label, side_key) in enumerate([(ipsi, ipsi_label, 'ipsi'),
+                                                              (~ipsi, contra_label, 'contra')]):
+            groups = [('rewarded', t[side_mask & rewarded], REWARDED),
+                      ('unrewarded', t[side_mask & ~rewarded], UNREWARDED)]
             psth_axes.append(raster_psth(fig, gs[0, 3 + 3 * k + j], spike_times, groups, window,
-                                         binSize, stepSize, f'{name}: {cond}', xlabel))
+                                         binSize, stepSize, f'{name}: {side_label} licks', xlabel,
+                                         store=store, info=info,
+                                         keys=[f'{align_key}_{side_key}_rewarded', f'{align_key}_{side_key}_unrewarded']))
         groups = [('no lick', ignored[ignore_col].values, IGNORE)]
+        # ignored trials at "response" are aligned to the end of the response window
         psth_axes.append(raster_psth(fig, gs[0, 5 + 3 * k], spike_times, groups, window,
-                                     binSize, stepSize, f'{name}: ignored', ignore_xlabel))
+                                     binSize, stepSize, f'{name}: ignored', ignore_xlabel,
+                                     store=store, info=info, keys=[f'{align_key}_ignored']))
 
     # spontaneous licks. Rates follow the notebook: causal PSP kernel, and bins within 1.5 s of
     # another spontaneous train start are masked, so the matrix is computed over both sides
@@ -571,10 +696,12 @@ def behavior_row(fig, spec, spike_times, session_df, tblTrials, spont, side, pre
         matrix, bin_times = get_spike_matrix(spike_times, times, SPONT_WINDOW[0], SPONT_WINDOW[1],
                                              binSize, stepSize, avoid_overlap=True, kernel=True,
                                              tau_rise=0.01, tau_decay=0.08)
-        groups = [(ipsi_label, times[is_ipsi], IPSI), (contra_label, times[~is_ipsi], CONTRA)]
+        groups = [(ipsi_label, times[is_ipsi], SPONT_IPSI), (contra_label, times[~is_ipsi], SPONT_CONTRA)]
         psth_axes.append(raster_psth(fig, gs[0, 9], spike_times, groups, SPONT_WINDOW, binSize,
                                      stepSize, 'Spontaneous licks', 'Time from lick-train start (s)',
-                                     matrices=[(matrix[is_ipsi], bin_times), (matrix[~is_ipsi], bin_times)]))
+                                     matrices=[(matrix[is_ipsi], bin_times), (matrix[~is_ipsi], bin_times)],
+                                     store=store, keys=['spont_ipsi', 'spont_contra'],
+                                     info=dict(kernel='psp', tau_rise=0.01, tau_decay=0.08, avoid_overlap=True)))
     else:
         ax = fig.add_subplot(gs[0, 9])
         ax.axis('off')
@@ -663,7 +790,11 @@ def opto_row(fig, spec, data, unit_id, spike_times, unit_row):
     ax_p.axhline(baseline, color=MUTED, ls='--', lw=0.8)
     ax_p.set_ylim(0, 1.05)
     ax_p.set_ylabel('P(resp)')
-    ax_p.set_title('Across pulses, by power', fontsize=fs)
+    cond = p_max_condition(data, unit_id)
+    pmax_label = ('' if cond is None else
+                  f"\np_max {cond['resp_p_bl']:.2f} (bl-sub), lat {1000 * cond['resp_lat']:.1f} ms, "
+                  f"power {cond['powers']:g} {cond['stim_times']}")
+    ax_p.set_title('Across pulses, by power' + pmax_label, fontsize=10)
     if per_power:
         ax_p.legend(title='Power', fontsize=7, title_fontsize=7, frameon=False,
                     loc='upper left', bbox_to_anchor=(1.0, 1.0))
@@ -767,7 +898,7 @@ def plane_panel(ax, meshes, unit_tbl, session, unit_id, title, xd, yd):
     others = tagged_ccf()
     others = others[others['session'] != session]
     X_all = others[CCF_COLS].to_numpy(float) - BREGMA_LPS_MM
-    ax.scatter(X_all[:, xd], X_all[:, yd], s=10, color=ALL_TAGGED_UNIT, linewidth=0, alpha=0.6,
+    ax.scatter(X_all[:, xd], X_all[:, yd], s=10, color=ALL_TAGGED_UNIT, linewidth=0, alpha=0.8,
                zorder=2, label='tagged, all sessions')
 
     tbl = unit_tbl[np.isfinite(unit_tbl[CCF_COLS].to_numpy(float)).all(axis=1)]
@@ -777,8 +908,8 @@ def plane_panel(ax, meshes, unit_tbl, session, unit_id, title, xd, yd):
     other = ~tagged & ~is_target
     ax.scatter(X[other, xd], X[other, yd], s=6, color=SESSION_UNIT, linewidth=0, zorder=1.5,
                label='other units, this session')
-    ax.scatter(X[tagged & ~is_target, xd], X[tagged & ~is_target, yd], s=16, color=TAGGED_UNIT,
-               edgecolor='white', linewidth=0.5, zorder=3, label='tagged, this session')
+    ax.scatter(X[tagged & ~is_target, xd], X[tagged & ~is_target, yd], s=22, color=SESSION_TAGGED_UNIT,
+               edgecolor=SESSION_TAGGED_EDGE, linewidth=0.6, zorder=3, label='tagged, this session')
     ax.scatter(X[is_target, xd], X[is_target, yd], s=160, marker='*', color=TARGET_UNIT,
                edgecolor='white', linewidth=1, zorder=4, label=f'unit {unit_id}')
 
@@ -825,16 +956,39 @@ def timeline_panels(fig, spec, unit_id, spike_times_all, data, ephys_cut, bin_le
     sub = gridspec.GridSpecFromSubplotSpec(3, 1, subplot_spec=spec, height_ratios=[1, 0.9, 1],
                                            hspace=0.45)
 
-    # firing rate
+    # firing rate: mean per 30 s bin, peak PEAK_BIN rate within it, and candidate bursts
     ax_fr = fig.add_subplot(sub[0])
-    edges = np.arange(t0, spike_times_all.max() + bin_len, bin_len)
-    counts, _ = np.histogram(spike_times_all, bins=edges)
-    ax_fr.stairs(counts / bin_len, (edges - t0) / 60, color='k')
+    n_sub = int(round(bin_len / PEAK_BIN))
+    fine_edges = np.arange(t0, spike_times_all.max() + PEAK_BIN, PEAK_BIN)
+    fine, _ = np.histogram(spike_times_all, bins=fine_edges)
+    n_bins = int(np.ceil(len(fine) / n_sub))
+    blocks = np.zeros(n_bins * n_sub)
+    blocks[:len(fine)] = fine
+    blocks = blocks.reshape(n_bins, n_sub)
+    edges = t0 + bin_len * np.arange(n_bins + 1)
+    x_edges = (edges - t0) / 60
+    mean_rate = blocks.sum(axis=1) / bin_len
+    k_max = blocks.max(axis=1)
+    peak_rate = k_max / PEAK_BIN
+    in_rec = fine_edges[:-1] <= spike_times_all.max()
+    burst_thresh = np.percentile(fine[in_rec] / PEAK_BIN, BURST_PCT)
+    floor = 0.5 / bin_len  # empty bins sit at the bottom of the log axis
+    ax_fr.stairs(np.maximum(peak_rate, floor), x_edges, color=PEAK_COLOR, lw=1,
+                 label=f'peak {PEAK_BIN:g} s rate')
+    ax_fr.stairs(np.maximum(mean_rate, floor), x_edges, color='k', lw=1.2, label=f'mean ({bin_len:.0f} s bins)')
+    burst = peak_rate > burst_thresh
+    centers = 0.5 * (x_edges[:-1] + x_edges[1:])
+    ax_fr.axhline(burst_thresh, color=PEAK_COLOR, ls=':', lw=0.8)
+    ax_fr.scatter(centers[burst], peak_rate[burst] * 1.35, marker='v', s=18, color=INK, zorder=4,
+                  label=f'peak > unit\'s {BURST_PCT}th pct of {PEAK_BIN:g} s rates ({burst_thresh:.0f} Hz; n={int(burst.sum())})')
     shade_epochs(ax_fr, data, t0, ephys_cut)
+    ax_fr.set_yscale('log')
+    ax_fr.set_ylim(floor, max(peak_rate.max(), 1) * 2.5)
     ax_fr.set_xlim(0, t_end)
-    ax_fr.set_ylabel(f'Rate (Hz, {bin_len} s bins)')
+    ax_fr.set_ylabel('Rate (Hz)')
     ax_fr.set_title('Session firing rate (red: opto blocks, blue: behavior, dashed: drift cut)',
                     fontsize=10)
+    ax_fr.legend(fontsize=7, frameon=False, loc='lower left', ncol=3)
     style(ax_fr)
 
     # choice history against go-cue time, all trials including ignored
@@ -879,33 +1033,50 @@ def timeline_panels(fig, spec, unit_id, spike_times_all, data, ephys_cut, bin_le
     style(ax_amp)
 
 
-def metrics_panel(ax, unit_row, per_power, best):
-    def fmt(key, digits=2):
-        val = unit_row.get(key, np.nan)
-        if isinstance(val, (bool, np.bool_)) or val is None or isinstance(val, str):
-            return str(val)
-        return f'{val:.{digits}f}' if np.isfinite(val) else 'nan'
-
-    X = np.array([unit_row.get(c, np.nan) for c in CCF_COLS], dtype=float) - BREGMA_LPS_MM
-    lines = [
-        ('decoder label', str(unit_row.get('decoder_label'))),
-        ('opto pass / default qc', f"{unit_row.get('opto_pass')} / {unit_row.get('default_qc')}"),
-        ('tagged loc', fmt('tagged_loc')),
-        ('firing rate (Hz)', fmt('firing_rate')),
-        ('ISI viol. (all / laser-free)', f"{fmt('isi_violations_ratio', 3)} / {fmt('isi_violations_ratio_nonopto', 3)}"),
-        ('snr / depth', f"{fmt('snr')} / {fmt('depth', 0)}"),
-        ('p_max (bl-sub) / lat (ms)', f"{fmt('p_max')} / {1000 * unit_row.get('lat_max_p', np.nan):.1f}"),
-        ('wf euclid / corr (at p_max)', f"{fmt('euc_max_p')} / {fmt('corr_max_p')}"),
-        ('best power / site', f"{best['power']} / {best['site']}" if best is not None else 'none'),
-        ('ML / AP / DV (mm)', ' / '.join(f'{v:.2f}' for v in X)),
-        ('ipsi lick side', str(ipsi_side(unit_row)[0])),
-    ]
-    ax.axis('off')
-    ax.set_title('Unit metrics', loc='left', fontsize=fs, color=INK)
-    for i, (k, v) in enumerate(lines):
-        y = 0.97 - i * 0.088
-        ax.text(0, y, k, fontsize=9, color=INK_2, transform=ax.transAxes, va='top')
-        ax.text(0.58, y, v, fontsize=9, color=INK, transform=ax.transAxes, va='top')
+def population_panels(fig, spec, unit_row, unit_latency_ms):
+    """Tagged vs matched non-tagged units for each POP_METRICS entry, with this unit marked.
+    Bars are fractions of each group so the two groups compare despite different sizes; values
+    outside the bin range are drawn in the edge bins."""
+    pop = population_metrics()
+    unit_vals = {'firing_rate': unit_row.get('firing_rate'), 'isi_violations_ratio': unit_row.get('isi_violations_ratio'),
+                 'snr': unit_row.get('snr'), 'latency_ms': unit_latency_ms}
+    sub = gridspec.GridSpecFromSubplotSpec(2, 2, subplot_spec=spec, hspace=0.75, wspace=0.3)
+    for k, (col, label, scale) in enumerate(POP_METRICS):
+        ax = fig.add_subplot(sub[k // 2, k % 2])
+        vals = pd.to_numeric(pop[col], errors='coerce')
+        u = pd.to_numeric(pd.Series([unit_vals[col]]), errors='coerce').iloc[0]
+        finite = vals[np.isfinite(vals)]
+        lo, hi = finite.min(), np.nanpercentile(finite, 99)
+        if np.isfinite(u):
+            lo, hi = min(lo, u), max(hi, u)
+        if scale == 'log':
+            lo = max(lo, finite[finite > 0].min())
+            bins = np.logspace(np.log10(lo), np.log10(hi), 25)
+            ax.set_xscale('log')
+        else:
+            bins = np.linspace(lo, hi, 25)
+        for is_tag, color, name in [(True, TAGGED_UNIT, 'tagged'), (False, NONTAGGED_POP, 'non-tagged')]:
+            x = vals[(pop['tagged'] == is_tag).values]
+            x = np.clip(x[np.isfinite(x)], bins[0], bins[-1])
+            if len(x) == 0:
+                continue
+            w = np.full(len(x), 1 / len(x))
+            ax.hist(x, bins=bins, weights=w, histtype='stepfilled', color=color, alpha=0.25, linewidth=0)
+            ax.hist(x, bins=bins, weights=w, histtype='step', color=color, linewidth=1.2,
+                    label=f'{name} (n={len(x)})')
+        text = 'n/a'
+        if np.isfinite(u):
+            ax.axvline(u, color=TARGET_UNIT, linewidth=2.5, zorder=5)
+            text = f'{u:.3f}' if col == 'isi_violations_ratio' else f'{u:.2f}' if col != 'latency_ms' else f'{u:.1f}'
+            if col == 'isi_violations_ratio' and np.isfinite(pd.to_numeric(unit_row.get('isi_violations_ratio_nonopto'), errors='coerce')):
+                text += f" (laser-free {float(unit_row['isi_violations_ratio_nonopto']):.3f})"
+        ax.set_title(f'{label}\nthis unit: {text}', fontsize=10)
+        ax.set_xlabel(label, fontsize=9)
+        if k % 2 == 0:
+            ax.set_ylabel('Fraction of units', fontsize=9)
+        if k == 0:
+            ax.legend(fontsize=7, frameon=False, loc='upper left')
+        style(ax)
 
 
 # ---------------------------------------------------------------------
@@ -917,27 +1088,42 @@ def plot_unit_summary(data, unit_id, meshes, curate_time=True, pre_event=-1.5, p
     unit_row = data['unit_tbl'].query('unit_id == @unit_id').iloc[0].to_dict()
     spike_times_all = unit_row['spike_times']
     spike_times, session_df, tblTrials, ephys_cut = curate_unit_times(data, unit_id, curate_time)
-    side, _ = ipsi_side(unit_row)
+    side, ml = ipsi_side(unit_row)
     spont = spontaneous_licks(data, tblTrials, ephys_cut)
 
     fig = plt.figure(figsize=(31, 24))
     outer = gridspec.GridSpec(3, 1, height_ratios=[1.35, 1, 1.45], hspace=0.25,
                               left=0.04, right=0.98, top=0.93, bottom=0.04)
+    psth = {}
     behavior_row(fig, outer[0], spike_times, session_df, tblTrials, spont, side, pre_event, post_event,
-                 binSize, stepSize)
+                 binSize, stepSize, store=psth)
     # opto uses the whole recording, matching opto_plotting_session's default (no ephys cut)
     per_power, best = opto_row(fig, outer[1], data, unit_id, spike_times_all, unit_row)
 
-    gs = gridspec.GridSpecFromSubplotSpec(1, 5, subplot_spec=outer[2], wspace=0.35,
-                                          width_ratios=[1, 1, 1, 1.6, 1.1])
+    gs = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=outer[2], wspace=0.2,
+                                          width_ratios=[3, 1.6, 1.5])
+    planes = gridspec.GridSpecFromSubplotSpec(2, 3, subplot_spec=gs[0, 0], height_ratios=[0.1, 1],
+                                              hspace=0.05, wspace=0.35)
+    # unit location over the three plane views
+    X = np.array([unit_row.get(c, np.nan) for c in CCF_COLS], dtype=float) - BREGMA_LPS_MM
+    depth = pd.to_numeric(unit_row.get('depth'), errors='coerce')
+    ax = fig.add_subplot(planes[0, :])
+    ax.axis('off')
+    loc = ('no CCF location' if not np.isfinite(X).all() else
+           f'ML {X[ML]:+.2f}   AP {X[AP]:.2f}   DV {X[DV]:.2f} mm from bregma')
+    ax.text(0, 0.5, f'Unit {unit_id}:  {loc}   |   probe depth {depth:.0f} um', fontsize=13,
+            color=INK, va='center', transform=ax.transAxes)
     if meshes['drn'] and 'x_ccf' in data['unit_tbl'].columns:
         for k, (title, xd, yd) in enumerate(PLANES):
-            ax = fig.add_subplot(gs[0, k])
+            ax = fig.add_subplot(planes[1, k])
             plane_panel(ax, meshes, data['unit_tbl'], data['session'], unit_id, title, xd, yd)
+            ax.set_anchor('N')  # equal-aspect panels sit right under the location line
             if k == 0:
                 ax.legend(fontsize=7, frameon=False, loc='lower left')
-    timeline_panels(fig, gs[0, 3], unit_id, spike_times_all, data, ephys_cut)
-    metrics_panel(fig.add_subplot(gs[0, 4]), unit_row, per_power, best)
+    timeline_panels(fig, gs[0, 1], unit_id, spike_times_all, data, ephys_cut)
+    cond = p_max_condition(data, unit_id)
+    latency_ms = 1000 * cond['resp_lat'] if cond is not None and pd.notna(cond['resp_lat']) else np.nan
+    population_panels(fig, gs[0, 2], unit_row, latency_ms)
 
     key = (data['session'], int(unit_id))
     passed = criteria_passed().get(key, [])
@@ -950,7 +1136,40 @@ def plot_unit_summary(data, unit_id, meshes, curate_time=True, pre_event=-1.5, p
     anti_label = ('antidromic: not tested' if anti is None else 'antidromic  ' + '  |  '.join(
         f"{focus}: {', '.join(anti[focus]) or 'none'}" for focus in ANTI_FOCUSES))
     fig.text(0.5, 0.968, anti_label, fontsize=15, ha='center', va='top')
+    match = nontagged_match(*key)
+    info = [f"decoder {unit_row.get('decoder_label')}", f"default qc {unit_row.get('default_qc')}",
+            f"opto pass {unit_row.get('opto_pass')}",
+            f'ipsi lick side {side}' if side is not None else 'no CCF: lick sides as right/left']
+    if match is not None:
+        info.append(f"matched non-tagged control for tagged unit {int(match['matched_tagged_unit'])} "
+                    f"({match['distance_um']:.0f} um away)")
+    fig.text(0.5, 0.95, '   |   '.join(info), fontsize=13, ha='center', va='top', color=INK_2)
+
+    os.makedirs(PSTH_DIR, exist_ok=True)
+    with open(os.path.join(PSTH_DIR, f"{data['session']}_unit_{unit_id}_psth.pkl"), 'wb') as f:
+        pickle.dump({'session': data['session'], 'unit_id': int(unit_id), 'tagged': tagged,
+                     'criteria': passed, 'ipsi_side': side,  # None: no CCF, ipsi/contra are right/left
+                     'ml_mm': ml, 'ephys_cut': ephys_cut,
+                     'matched_tagged_unit': None if match is None else int(match['matched_tagged_unit']),
+                     'firing_rate': unit_row.get('firing_rate'), 'window': (pre_event, post_event),
+                     'spont_window': SPONT_WINDOW, 'psth': psth}, f)
     return fig
+
+
+def load_population_psth(psth_dir=PSTH_DIR):
+    """Unit-mean PSTHs saved with the summary pages, one row per unit x condition: session,
+    unit_id, tagged, condition, bin_times, mean, sem, n_trials. The per-trial matrices are in
+    each unit's pickle ('psth' -> condition -> 'matrix')."""
+    rows = []
+    for f in sorted(os.listdir(psth_dir)):
+        if not f.endswith('_psth.pkl'):
+            continue
+        d = _load_pickle(os.path.join(psth_dir, f))
+        for cond, p in d['psth'].items():
+            rows.append({'session': d['session'], 'unit_id': d['unit_id'], 'tagged': d['tagged'],
+                         'ipsi_side': d['ipsi_side'], 'condition': cond, 'bin_times': p['bin_times'],
+                         'mean': p['mean'], 'sem': p['sem'], 'n_trials': p['n_trials']})
+    return pd.DataFrame(rows)
 
 
 def plot_unit_summary_session(session, units=None, data_type='raw', target='soma', model_name=None,
