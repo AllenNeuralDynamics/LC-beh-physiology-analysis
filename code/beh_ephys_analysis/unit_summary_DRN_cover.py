@@ -4,7 +4,10 @@
 #           metrics (firing rate, ISI violations, SNR, latency); unit locations in three planes
 #   page 2: for every condition on the unit pages, the population PSTH, tagged (red) vs
 #           non-tagged (gray), over heatmaps of each unit's trace (viridis), one per group
-#   page 3: every unit's normalized waveform, tagged and non-tagged grids, ordered by the score
+#   page 3: response profiles (unit_response_profiles_DRN): profile counts and mean responses,
+#           waveforms and shape scores by profile, and properties of non-tagged sustained vs
+#           inhibited units against tagged units; built from the same PSTH folder as page 2
+#   page 4: every unit's normalized waveform, tagged and non-tagged grids, ordered by the score
 #           on the first waveform principal component (as the grid in F_waveform_space_DRN_v2)
 #
 # PSTHs come from the per-unit files written with the summary pages (PSTH_DIR), so the page
@@ -40,6 +43,8 @@ from unit_summary_DRN import (OUT_DIR, NONTAGGED_SELECTION, PSTH_DIR, TAGGED_CRI
 from utils.plot_utils import shiftedColorMap  # noqa: F401  (keeps import order as unit_summary_DRN)
 
 COVER_PDF = os.path.join(OUT_DIR, 'cover', 'unit_summary_DRN_cover.pdf')
+JPG_DPI = 100  # same as the flattened unit pages in unit_summary_DRN_run_all.py
+JPG_QUALITY = 85
 FLAGS_CSV = os.path.join(OUT_DIR, 'population_unit_flags.csv')
 REVIEW_DIR = os.path.join(OUT_DIR, 'drift_nontagged_review')
 NONTAGGED_RING = '#5c5b57'  # darker than NONTAGGED_POP so open rings read on the light mesh
@@ -65,7 +70,7 @@ HEAT_CMAP.set_bad('#d9d9d9')  # units without enough trials in the condition
 # the trough (sample 30); the notebook's bad-shape rule drops waveforms whose first sample
 # exceeds the trough-normalized value 1. One PCA is fit on both groups.
 WF_CACHE = os.path.join(OUT_DIR, 'population_waveforms.pkl')
-N_COVER_PAGES = 3
+N_COVER_PAGES = 4
 WF_ALIGN = 90  # alignment sample of waveform_mean
 WF_PRE, WF_POST = 30, 60
 WF_FS = 30000
@@ -89,10 +94,10 @@ def unit_sets():
     return tagged, set(zip(sel['session'], sel['unit_id'].astype(int))), sel
 
 
-def load_psths(tagged, nontagged):
+def load_psths(tagged, nontagged, psth_dir=PSTH_DIR):
     """{(session, unit): saved page dict} for units in either current set."""
     out = {}
-    for f in glob.glob(os.path.join(PSTH_DIR, '*_psth.pkl')):
+    for f in glob.glob(os.path.join(psth_dir, '*_psth.pkl')):
         with open(f, 'rb') as fh:
             d = pickle.load(fh)
         key = (d['session'], int(d['unit_id']))
@@ -233,7 +238,10 @@ def plane_map(ax, meshes, units, xd, yd, title):
     style(ax)
 
 
-def methods_text(tagged, sel, flags, normalize=NORMALIZE):
+TASK_SMOOTHING = 'causal PSP kernel, rise 10 ms, decay 80 ms, 50 ms steps; only spikes before each time point count'
+
+
+def methods_text(tagged, sel, flags, normalize=NORMALIZE, smoothing=TASK_SMOOTHING):
     with open(os.path.join(CRITERIA_DIR, f'{TAGGED_CRITERION}.json')) as f:
         c = json.load(f)
     b = lambda k: c[k]['bounds']
@@ -279,7 +287,7 @@ def methods_text(tagged, sel, flags, normalize=NORMALIZE):
              f", divided by the trial-to-trial SD of its baseline rate (z-score; units with baseline SD "
              f"< {MIN_BASELINE_SD} Hz left out)")
     psth_par = (
-        f"PSTHs (page 2): each unit's mean rate (0.2 s bins, 0.05 s steps; spontaneous licks with the causal PSP kernel of "
+        f"PSTHs (page 2): each unit's mean rate ({smoothing}; spontaneous licks with the causal PSP kernel of "
         f"F_spont_choice_lick_neuron_DRN) minus its baseline (pre-go-cue {TASK_BASELINE[0]}-{TASK_BASELINE[1]} s for task "
         f"conditions, {SPONT_BASELINE[0]} to {SPONT_BASELINE[1]} s before lick-train start for spontaneous licks){scale}, "
         f"averaged over units with >= {MIN_TRIALS} trials in the condition; shading is SEM across units. Ipsi/contra are "
@@ -365,7 +373,7 @@ def page_waveforms(tagged, nontagged, psths):
     t = 1000 * (np.arange(X.shape[1]) - WF_PRE) / WF_FS
 
     fig = plt.figure(figsize=(31, 24))
-    page_titles(fig, tagged, nontagged, psths, 3)
+    page_titles(fig, tagged, nontagged, psths, 4)
     outer = gridspec.GridSpec(2, 2, height_ratios=[0.13, 1], width_ratios=[1, 1], hspace=0.08, wspace=0.06,
                               left=0.03, right=0.98, top=0.94, bottom=0.03)
     # what PC1 captures: mean waveform +/- 2 SD along PC1
@@ -385,7 +393,7 @@ def page_waveforms(tagged, nontagged, psths):
     ax.text(0, 0.9, '\n'.join(textwrap.wrap(
         'Each cell is one unit\'s mean template on its peak channel (waveform_mean, the combined table\'s "wf"), '
         f'{1000 * WF_PRE / WF_FS:.0f} ms before to {1000 * WF_POST / WF_FS:.0f} ms after the trough, baseline-subtracted and '
-        'divided by the trough as in F_waveform_space_DRN_v2, all on one y scale. Units are ordered by waveform PC1 '
+        'divided by the trough, all on one y scale. Units are ordered by waveform PC1 '
         'score, low (top left) to high (bottom right), separately within each group. '
         f'{n_bad} units with malformed waveforms are left out.', 130)), fontsize=12, va='top', color=INK_2,
         transform=ax.transAxes)
@@ -407,6 +415,15 @@ def page_waveforms(tagged, nontagged, psths):
     return fig
 
 
+def page_profiles(tagged, nontagged, psths, psth_dir=PSTH_DIR):
+    """Page 3: the response-profile comparison of unit_response_profiles_DRN."""
+    # imported here: unit_response_profiles_DRN imports from this module
+    from unit_response_profiles_DRN import profile_page
+    fig = profile_page(psth_dir)
+    page_titles(fig, tagged, nontagged, psths, 3)
+    return fig
+
+
 def page_titles(fig, tagged, nontagged, psths, page):
     fig.text(0.04, 0.985, f'DRN units: 5-HT tagged vs non-tagged  ({page}/{N_COVER_PAGES})', fontsize=30,
              fontweight='normal', color=INK, va='top')
@@ -416,7 +433,7 @@ def page_titles(fig, tagged, nontagged, psths, page):
              fontsize=14, color=INK_2, ha='right', va='top')
 
 
-def page_selection(tagged, nontagged, sel, psths, pop, units, normalize):
+def page_selection(tagged, nontagged, sel, psths, pop, units, normalize, smoothing=TASK_SMOOTHING):
     """Page 1: selection criteria, unit metrics, unit locations."""
     fig = plt.figure(figsize=(31, 24))
     page_titles(fig, tagged, nontagged, psths, 1)
@@ -427,7 +444,7 @@ def page_selection(tagged, nontagged, sel, psths, pop, units, normalize):
     ax.axis('off')
     y = 1.0
     for head, par in zip(['Tagged unit selection criteria:', 'Non tagged unit selection criteria:', 'Population PSTHs:'],
-                         methods_text(tagged, sel, None, normalize)):
+                         methods_text(tagged, sel, None, normalize, smoothing)):
         ax.text(0, y, head, fontsize=15, fontweight='normal', color=INK, va='top', transform=ax.transAxes)
         lines = textwrap.wrap(par, 140)
         ax.text(0, y - 0.06, '\n'.join(lines), fontsize=12, color=INK, va='top', linespacing=1.4,
@@ -503,10 +520,10 @@ def page_psth(tagged, nontagged, psths, normalize):
     return fig
 
 
-def make_cover(out=COVER_PDF, normalize=NORMALIZE):
-    """Write both cover pages to one PDF; returns its path."""
+def make_cover(out=COVER_PDF, normalize=NORMALIZE, psth_dir=PSTH_DIR, smoothing=TASK_SMOOTHING):
+    """Write the cover pages to one PDF, plus one .jpg per page next to it; returns the PDF path."""
     tagged, nontagged, sel = unit_sets()
-    psths = load_psths(tagged, nontagged)
+    psths = load_psths(tagged, nontagged, psth_dir)
     pop = population_metrics()
     flags = pd.read_csv(FLAGS_CSV)
     key = list(zip(flags['session'], flags['unit_id']))
@@ -516,12 +533,14 @@ def make_cover(out=COVER_PDF, normalize=NORMALIZE):
 
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with PdfPages(out) as pdf:
-        for fig in [page_selection(tagged, nontagged, sel, psths, pop, units, normalize),
-                    page_psth(tagged, nontagged, psths, normalize),
-                    page_waveforms(tagged, nontagged, psths)]:
+        for i, fig in enumerate([page_selection(tagged, nontagged, sel, psths, pop, units, normalize, smoothing),
+                                 page_psth(tagged, nontagged, psths, normalize),
+                                 page_profiles(tagged, nontagged, psths, psth_dir),
+                                 page_waveforms(tagged, nontagged, psths)], 1):
             pdf.savefig(fig)
+            fig.savefig(out.replace('.pdf', f'_{i}.jpg'), dpi=JPG_DPI, pil_kwargs={'quality': JPG_QUALITY})
             plt.close(fig)
-    print(f'wrote {out}')
+    print(f'wrote {out} and {i} .jpg pages')
     return out
 
 

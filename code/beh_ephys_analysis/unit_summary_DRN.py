@@ -40,12 +40,15 @@ import spikeinterface as si
 from aind_ephys_utils import align
 from aind_dynamic_foraging_basic_analysis.plot.plot_foraging_session import plot_foraging_session
 from utils.beh_functions import session_dirs, makeSessionDF, get_session_tbl, get_unit_tbl, get_history_from_nwb
-from utils.ephys_functions import load_drift, plot_raster_rate, get_spike_matrix, plot_filled_sem
+from utils.ephys_functions import load_drift, plot_raster_rate, get_spike_matrix, plot_filled_sem, psp_filter
 from utils.ccf_utils import project_to_plane, pir_to_lps
 from utils.plot_utils import shiftedColorMap
 from utils.lick_utils import load_licks
 from utils.capsule_migration import capsule_directories
 from utils.combine_tools import apply_qc, to_str_intlike
+sys.path.insert(0, os.path.join(curr_path, 'session_combine', 'figure_preparation'))
+from rhythmicity_DRN import spontaneous_window
+from regularity_spatial import local_variation, MIN_SPIKES as LV_MIN_SPIKES
 from unit_beh_analysis_JL import save_fig
 
 
@@ -93,6 +96,12 @@ MASTER_CSV = '/root/capsule/scratch/combined/master_unit_tables/master_all_units
 NONTAGGED_SELECTION = os.path.join(OUT_DIR, 'nontagged_matched_selection.csv')
 # every PSTH on a page, saved per unit for population averages (see load_population_psth)
 PSTH_DIR = os.path.join(OUT_DIR, 'psth')
+# task PSTHs (go cue / response): causal PSP kernel, as for spontaneous licks, so spikes after
+# an event never appear before it (a centered 0.2 s window put go-cue responses ~75-100 ms early)
+TASK_TAU_RISE, TASK_TAU_DECAY = 0.01, 0.08
+# per-trial spike counts saved with each task PSTH for statistics (response profiles), counted
+# directly so the windows cannot overlap the way smoothed bins do
+COUNT_WINDOWS = {'baseline': (-1.5, 0), 'early': (0, 0.5), 'late': (0.5, 2.5)}
 POP_CACHE = os.path.join(OUT_DIR, 'population_metrics.csv')
 POP_METRICS = [('firing_rate', 'Firing rate (Hz)', 'log'),
                ('isi_violations_ratio', 'ISI violations ratio', 'linear'),
@@ -300,6 +309,8 @@ def load_session_data(session, data_type='raw', target='soma', model_name=None):
         'crosscorr': crosscorr,
         'licks': licks,
         'spike_amplitudes': load_spike_amplitudes(session, data_type),
+        # opto-free window for LV, as in regularity_spatial.py / rhythmicity_DRN.py
+        'spont_window': spontaneous_window(session, data_type),
     }
 
 
@@ -525,8 +536,37 @@ def ipsi_side(unit_row):
     return ('right' if ml >= 0 else 'left'), ml
 
 
-def store_psth(store, key, matrix, bin_times, align_times, **info):
-    """Keep one PSTH (trial x time rate matrix, mean, SEM) for saving with the page."""
+def causal_kernel_matrix(spike_times, align_times, tb, tf, step, tau_rise=TASK_TAU_RISE,
+                         tau_decay=TASK_TAU_DECAY):
+    """Trial x time rate matrix with the causal PSP kernel: rate at t = sum over spikes in
+    [t - 10 tau_decay, t) of psp_filter(t - spike), divided by the kernel's integral. Same values
+    as utils.ephys_functions.get_spike_matrix_filter (avoid_overlap=False), vectorized per event."""
+    time_bins = np.arange(tb, tf, step)
+    reach = 10 * tau_decay
+    spikes = np.sort(np.asarray(spike_times, float))
+    out = np.zeros((len(align_times), len(time_bins)))
+    for i, ev in enumerate(np.asarray(align_times, float)):
+        lo, hi = np.searchsorted(spikes, [ev + tb - reach, ev + tf])
+        s = spikes[lo:hi] - ev
+        if len(s) == 0:
+            continue
+        d = time_bins[:, None] - s[None, :]
+        use = (d > 0) & (d <= reach)
+        out[i] = np.where(use, psp_filter(np.where(use, d, 1.0), tau_rise, tau_decay), 0).sum(axis=1)
+    return out / (tau_decay ** 2 / (tau_decay + tau_rise)), time_bins
+
+
+def window_counts(spike_times, align_times):
+    """{window name: per-trial rate (Hz) from spike counts} for COUNT_WINDOWS."""
+    spikes = np.sort(np.asarray(spike_times, float))
+    ev = np.asarray(align_times, float)
+    return {name: (np.searchsorted(spikes, ev + w[1]) - np.searchsorted(spikes, ev + w[0])) / (w[1] - w[0])
+            for name, w in COUNT_WINDOWS.items()}
+
+
+def store_psth(store, key, matrix, bin_times, align_times, spike_times=None, **info):
+    """Keep one PSTH (trial x time rate matrix, mean, SEM) for saving with the page; with
+    spike_times, also the per-trial window rates of COUNT_WINDOWS ('window_rates')."""
     if store is None:
         return
     matrix = np.asarray(matrix, dtype=float)
@@ -536,6 +576,8 @@ def store_psth(store, key, matrix, bin_times, align_times, **info):
                   'sem': (np.nanstd(matrix, axis=0) / np.sqrt(np.maximum(n, 1))) if len(matrix)
                          else np.full(len(bin_times), np.nan),
                   'n_trials': len(matrix), 'align_times': np.asarray(align_times), **info}
+    if spike_times is not None:
+        store[key]['window_rates'] = window_counts(spike_times, align_times)
 
 
 def raster_psth(fig, spec, spike_times, groups, window, binSize, stepSize, title, xlabel,
@@ -561,12 +603,12 @@ def raster_psth(fig, spec, spike_times, groups, window, binSize, stepSize, title
                    color=color, linewidth=0.6)
         offset += len(align_times)
         if matrices is None:
-            matrix, bin_times = get_spike_matrix(spike_times, align_times, pre_event=window[0],
-                                                 post_event=window[1], binSize=binSize, stepSize=stepSize)
+            matrix, bin_times = causal_kernel_matrix(spike_times, align_times, window[0], window[1], stepSize)
         else:
             matrix, bin_times = matrices[g]
         if keys is not None:
-            store_psth(store, keys[g], matrix, bin_times, align_times, **(info or {}))
+            store_psth(store, keys[g], matrix, bin_times, align_times,
+                       spike_times=spike_times if matrices is None else None, **(info or {}))
         plot_filled_sem(bin_times, matrix, color, ax2, f'{label} (n={len(align_times)})')
     if offset == 0:
         ax1.text(0.5, 0.5, 'No trials', ha='center', va='center', color=MUTED, transform=ax1.transAxes)
@@ -625,12 +667,12 @@ def behavior_row(fig, spec, spike_times, session_df, tblTrials, spont, side, pre
         if col == 1:
             ax.set_ylabel('Trial number')
         style(ax)
-        matrix, bin_times = get_spike_matrix(spike_times, align_time, pre_event=pre_event,
-                                             post_event=post_event, binSize=binSize, stepSize=stepSize)
+        matrix, bin_times = causal_kernel_matrix(spike_times, align_time, pre_event, post_event, stepSize)
         ax_s = fig.add_subplot(sub[1], sharex=ax)
         strips.append((ax_s, np.nanmean(matrix, axis=0), bin_times))
         store_psth(store, f"{name.replace(' ', '_')}_all", matrix, bin_times, align_time,
-                   binSize=binSize, stepSize=stepSize, kernel=None)
+                   spike_times=spike_times, stepSize=stepSize, kernel='psp',
+                   tau_rise=TASK_TAU_RISE, tau_decay=TASK_TAU_DECAY)
         ax_s.set_xlabel(f'Time from {name} (s)')
         ax_s.set_yticks([])
     # one color scale for both strips
@@ -668,7 +710,7 @@ def behavior_row(fig, spec, spike_times, session_df, tblTrials, spont, side, pre
     for k, (col, ignore_col, name, xlabel, ignore_xlabel) in enumerate(alignments):
         t = session_df[col].values
         align_key = 'go_cue' if k == 0 else 'response'
-        info = dict(binSize=binSize, stepSize=stepSize, kernel=None)
+        info = dict(stepSize=stepSize, kernel='psp', tau_rise=TASK_TAU_RISE, tau_decay=TASK_TAU_DECAY)
         for j, (side_mask, side_label, side_key) in enumerate([(ipsi, ipsi_label, 'ipsi'),
                                                               (~ipsi, contra_label, 'contra')]):
             groups = [('rewarded', t[side_mask & rewarded], REWARDED),
@@ -757,7 +799,23 @@ def opto_block_raster(ax, spike_times, block, opto_info, window, title):
     ax.set_ylabel('Power (trains in time order)')
 
 
-def opto_row(fig, spec, data, unit_id, spike_times, unit_row):
+def unit_lv(data, spike_times, ephys_cut):
+    """Local variation (Shinomoto 2003) of the ISIs in the opto-free window intersected with
+    the unit's drift cut, as in regularity_spatial.py; NaN with fewer than LV_MIN_SPIKES spikes."""
+    window = data.get('spont_window')
+    if window is None:
+        return np.nan, 0
+    start = max(window[0], ephys_cut[0]) if ephys_cut[0] is not None else window[0]
+    end = min(window[1], ephys_cut[1]) if ephys_cut[1] is not None else window[1]
+    spikes = np.sort(np.asarray(spike_times, float))
+    spikes = spikes[(spikes >= start) & (spikes <= end)]
+    if len(spikes) < LV_MIN_SPIKES:
+        return np.nan, len(spikes)
+    isis = np.diff(spikes)
+    return local_variation(isis[isis > 0]), len(spikes)
+
+
+def opto_row(fig, spec, data, unit_id, spike_times, unit_row, lv=None):
     # rasters get the extra width so spikes can be read against the 4 ms pulses
     gs = gridspec.GridSpecFromSubplotSpec(1, 5, subplot_spec=spec, wspace=0.3,
                                           width_ratios=[2.6, 2.6, 1.2, 1, 1.6])
@@ -871,7 +929,12 @@ def opto_row(fig, spec, data, unit_id, spike_times, unit_row):
                     if acg.sum() > 0:
                         ax.stairs(acg / acg.sum(), cc['time_bins'], color=color, fill=True, alpha=0.7)
                 ax.set_xlim(cc['time_bins'][0], cc['time_bins'][-1])
-            ax.set_title(f'ACG {length}: {name}', fontsize=10)
+            title = f'ACG {length}: {name}'
+            if length == 'long' and period == 'nolaser' and lv is not None:
+                lv_val, n_lv = lv
+                title += (f'\nLV {lv_val:.2f} (opto-free, {n_lv} spikes)' if np.isfinite(lv_val)
+                          else f'\nLV n/a (< {LV_MIN_SPIKES} opto-free spikes)')
+            ax.set_title(title, fontsize=10)
             if j == 0:
                 ax.set_ylabel('Fraction')
             else:
@@ -1098,7 +1161,8 @@ def plot_unit_summary(data, unit_id, meshes, curate_time=True, pre_event=-1.5, p
     behavior_row(fig, outer[0], spike_times, session_df, tblTrials, spont, side, pre_event, post_event,
                  binSize, stepSize, store=psth)
     # opto uses the whole recording, matching opto_plotting_session's default (no ephys cut)
-    per_power, best = opto_row(fig, outer[1], data, unit_id, spike_times_all, unit_row)
+    per_power, best = opto_row(fig, outer[1], data, unit_id, spike_times_all, unit_row,
+                               lv=unit_lv(data, spike_times_all, ephys_cut))
 
     gs = gridspec.GridSpecFromSubplotSpec(1, 3, subplot_spec=outer[2], wspace=0.2,
                                           width_ratios=[3, 1.6, 1.5])

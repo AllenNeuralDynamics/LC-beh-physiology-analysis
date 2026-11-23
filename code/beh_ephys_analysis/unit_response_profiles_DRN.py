@@ -3,7 +3,7 @@
 #
 # Classes (go cue and response, from the per-trial PSTH matrices saved with the unit pages):
 #   each window (EARLY, LATE after the event) is up, down or none against the same trials'
-#   pre-go-cue baseline: paired Wilcoxon p < ALPHA and |mean change| >= MIN_EFFECT_SD x the
+#   pre-go-cue baseline, using per-trial spike counts saved with the pages (COUNT_WINDOWS): paired Wilcoxon p < ALPHA and |mean change| >= MIN_EFFECT_SD x the
 #   trial-to-trial SD of the baseline rate. A significant change smaller than that counts as
 #   none, so large trial counts do not turn sub-Hz shifts into responses.
 #   profile:  sustained excitation  late up
@@ -17,6 +17,9 @@
 #   CV2 and global CV of ISIs in the opto-free window intersected with the unit's drift cut
 #   (non-tagged cuts from _opto_drift_tbl_nontagged.csv); trough-to-peak, trough half-width
 #   and peak/trough ratio of the mean waveform on its peak channel; SNR; depth; CCF DV.
+#
+# The comparison figure is also page 3 of the summary cover (unit_summary_DRN_cover.make_cover,
+# via profile_page).
 #
 #     python unit_response_profiles_DRN.py          # table + comparison figure
 
@@ -38,7 +41,7 @@ from joblib import Parallel, delayed
 from scipy.stats import wilcoxon, mannwhitneyu
 from sklearn.decomposition import PCA
 
-from unit_summary_DRN import (OUT_DIR, TAGGED_UNIT, NONTAGGED_POP, INK, INK_2, MUTED, style,
+from unit_summary_DRN import (OUT_DIR, PSTH_DIR, COUNT_WINDOWS, TAGGED_UNIT, NONTAGGED_POP, INK, INK_2, MUTED, style,
                               nontagged_drift_cut, load_drift)
 from unit_summary_DRN_cover import unit_sets, load_psths
 from utils.beh_functions import get_unit_tbl
@@ -68,6 +71,11 @@ N_JOBS = 8
 
 
 def window_rates(p, win):
+    """Per-trial rate in win: direct spike counts saved with the page when win is one of its
+    COUNT_WINDOWS, else the mean of the smoothed matrix over the window."""
+    for name, w in COUNT_WINDOWS.items():
+        if tuple(win) == tuple(w) and name in p.get('window_rates', {}):
+            return np.asarray(p['window_rates'][name], float)
     t = p['bin_times']
     return np.nanmean(np.asarray(p['matrix'], float)[:, (t >= win[0]) & (t < win[1])], axis=1)
 
@@ -171,9 +179,17 @@ def session_properties(session, units):
     return rows
 
 
-def build_table():
+def outputs(psth_dir=PSTH_DIR):
+    """(table csv, stats csv) for profiles built from psth_dir; non-default PSTH folders (e.g.
+    the causal-kernel demo) get their own files so the main table is not overwritten."""
+    suffix = '' if os.path.normpath(psth_dir) == os.path.normpath(PSTH_DIR) else f'_{os.path.basename(os.path.normpath(psth_dir))}'
+    return (TABLE_CSV.replace('.csv', f'{suffix}.csv'),
+            os.path.join(PROFILE_DIR, f'response_profile_stats_go_cue{suffix}.csv'))
+
+
+def build_table(psth_dir=PSTH_DIR):
     tagged, nontagged, _ = unit_sets()
-    psths = load_psths(tagged, nontagged)
+    psths = load_psths(tagged, nontagged, psth_dir)
     rows = []
     for key, d in psths.items():
         row = {'session': key[0], 'unit_id': key[1], 'tagged': key in tagged}
@@ -209,7 +225,7 @@ def build_table():
     flags = pd.read_csv(FLAGS_CSV, usecols=['session', 'unit_id', 'DV'])
     tbl = tbl.merge(master, on=['session', 'unit_id'], how='left').merge(flags, on=['session', 'unit_id'], how='left')
     os.makedirs(PROFILE_DIR, exist_ok=True)
-    tbl.to_csv(TABLE_CSV, index=False)
+    tbl.to_csv(outputs(psth_dir)[0], index=False)
     return tbl, wf, psths, pca
 
 
@@ -250,9 +266,12 @@ def compare(tbl, align='go_cue'):
     return out
 
 
-def figure(tbl, wf, psths, stats, out=FIG_PDF):
+def profile_figure(tbl, wf, psths, stats, title=True):
+    """The comparison page as a figure; title=False leaves the top line to the caller (the
+    summary cover adds its own page title)."""
     fig = plt.figure(figsize=(31, 24))
-    fig.text(0.04, 0.985, 'DRN response profiles: tagged vs non-tagged', fontsize=28, color=INK, va='top')
+    if title:
+        fig.text(0.04, 0.985, 'DRN response profiles: tagged vs non-tagged', fontsize=28, color=INK, va='top')
     fig.text(0.04, 0.955, f'Profiles from early ({EARLY[0]}-{EARLY[1]} s) and late ({LATE[0]}-{LATE[1]} s) windows vs '
                           f'the pre-go-cue baseline: paired Wilcoxon p < {ALPHA} and |change| >= {MIN_EFFECT_SD} '
                           f'baseline SD. Sustained = late up; inhibited = early down, or late down without early up; '
@@ -358,10 +377,24 @@ def figure(tbl, wf, psths, stats, out=FIG_PDF):
                           'comparisons (S = NT sustained excitation, I = NT inhibited, T = all tagged). LV, CV2 from the '
                           f'opto-free window within each unit\'s drift cut (>= {MIN_SPIKES} spikes).',
              fontsize=11, color=INK_2)
+    return fig
+
+
+def figure(tbl, wf, psths, stats, out=FIG_PDF):
+    fig = profile_figure(tbl, wf, psths, stats)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     fig.savefig(out)
     plt.close(fig)
     print(f'wrote {out}')
+
+
+def profile_page(psth_dir=PSTH_DIR):
+    """Build the profile table and stats from psth_dir, save them, and return the comparison
+    page without its own title (cover page 3)."""
+    tbl, wf, psths, _ = build_table(psth_dir)
+    stats = compare(tbl)
+    stats.to_csv(outputs(psth_dir)[1], index=False)
+    return profile_figure(tbl, wf, psths, stats, title=False)
 
 
 if __name__ == '__main__':
@@ -371,7 +404,7 @@ if __name__ == '__main__':
         print(f'\n{align} profiles:')
         print(pd.crosstab(tbl[f'profile_{align}'], tbl['tagged'].map({True: 'tagged', False: 'non-tagged'})))
     stats = compare(tbl)
-    stats.to_csv(os.path.join(PROFILE_DIR, 'response_profile_stats_go_cue.csv'), index=False)
+    stats.to_csv(outputs()[1], index=False)
     pd.set_option('display.width', 200)
     print('\n', stats.round(4).to_string(index=False))
     figure(tbl, wf, psths, stats)
